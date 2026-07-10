@@ -37,7 +37,11 @@ select = [
     "C4",  # flake8-comprehensions
     "RUF", # Ruff-specific rules
 ]
-ignore = []
+ignore = [
+    "RUF001", # Ambiguous Unicode character in string
+    "RUF002", # Ambiguous Unicode character in docstring
+    "RUF003", # Ambiguous Unicode character in comment
+]
 [tool.mypy]
 python_version = "3.14"
 strict = true

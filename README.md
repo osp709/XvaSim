@@ -4,13 +4,16 @@
 
 # XvaSim: Valuation Adjustment (XVA) Simulation & Calculation Engine
 
-`XvaSim` is a lightweight, high-performance Python library designed for simulating and calculating credit and valuation adjustments (XVAs). The core of the library focuses on **Credit Valuation Adjustment (CVA)**, incorporating Cox-Ingersoll-Ross (CIR) credit model calibration and path-wise aggregation.
+`XvaSim` is a lightweight, high-performance Python library designed for simulating and calculating credit and valuation adjustments (XVAs). The library provides:
+
+*   **Credit Valuation Adjustment (CVA)** — Cox-Ingersoll-Ross (CIR) credit model calibration and path-wise aggregation.
+*   **FX Derivative Pricing Engine** — Monte Carlo pricing of currency forwards (`price_fx_forward`) and European currency options (`price_fx_option`) using a two-currency **Linear Gauss-Markov (LGM)** model calibrated to swaption market data.
 
 ---
 
 ## 🏗️ System Architecture & Workflow
 
-The workflow of the CVA engine consists of two main phases: **Credit Model Calibration** and **Path Aggregation**.
+The workflow of the CVA engine consists of two main phases: **Credit Model Calibration** (using `CIRParams`) and **Path Aggregation**.
 
 ```mermaid
 graph TD
@@ -107,14 +110,50 @@ Where:
 
 ---
 
+## 🧮 LGM Pricing Engine — Mathematical Foundations
+
+### 1. LGM State Variable
+The LGM state variable for each currency evolves under the risk-neutral measure as:
+
+$$dx(t) = -\kappa\,x(t)\,dt + \sigma(t)\,dW(t)$$
+
+where $\kappa$ is the mean-reversion speed and $\sigma(t)$ is a piecewise-constant volatility calibrated to swaptions.
+
+### 2. Discount Bond Prices
+The time-$t$ price of a zero-coupon bond maturing at $T$:
+
+$$P(t,T) = \frac{P(0,T)}{P(0,t)}\exp\!\left(-H(T)\,x(t) - \tfrac{1}{2}\bigl(H(T)^2 - H(t)^2\bigr)\zeta(t)\right)$$
+
+with $H(t) = \frac{1-e^{-\kappa t}}{\kappa}$ and $\zeta(t) = \int_0^t \sigma(s)^2 e^{-2\kappa(t-s)}ds$.
+
+### 3. Two-Currency FX Model
+The spot FX rate (domestic per foreign) follows:
+
+$$\frac{dS(t)}{S(t)} = (r_d(t) - r_f(t))\,dt + \sigma_{FX}\,dW_{FX}(t)$$
+
+with a quanto drift adjustment on the foreign LGM state to account for measure change.
+
+### 4. Swaption Calibration
+The piecewise-constant $\sigma(t)$ is bootstrapped expiry-by-expiry: for each swaption, a Brent root-finding step solves for the volatility segment that matches the market normal (Bachelier) price.
+
+### 5. FX Derivative Payoffs
+*   **Currency Forward**: $N \cdot (S(T) - K)$
+*   **Currency Call Option**: $N \cdot \max(S(T) - K, 0)$
+*   **Currency Put Option**: $N \cdot \max(K - S(T), 0)$
+
+---
+
 ## 📁 Codebase Structure
 
 *   `src/xvasim/`
-    *   [`__init__.py`](file:///d:/Projects/XvaSim/src/xvasim/__init__.py): Exposes package public APIs.
-    *   [`cva_engine.py`](file:///d:/Projects/XvaSim/src/xvasim/cva_engine.py): Core algorithms for CVA computation, CIR survival probability calculation, calibration, and marginal default probabilities.
-    *   [`utils.py`](file:///d:/Projects/XvaSim/src/xvasim/utils.py): Utility functions, including date-to-tenor conversion.
+    *   [`__init__.py`](file:///d:/Projects/XvaSim/src/xvasim/__init__.py): Exposes package public APIs (`CIRParams`, `compute_cva`, `compute_marginal_pd`, `dates_to_years`, `LGMParams`, `FXLGMParams`, `calibrate_lgm_to_swaptions`, `price_fx_forward`, `price_fx_option`).
+    *   [`cva_engine.py`](file:///d:/Projects/XvaSim/src/xvasim/cva_engine.py): Core algorithms for CVA computation, CIR survival probability calculation (using the `CIRParams` dataclass), calibration, and marginal default probabilities.
+    *   [`pricing_engine.py`](file:///d:/Projects/XvaSim/src/xvasim/pricing_engine.py): LGM-based Monte Carlo pricing engine for currency forwards (`price_fx_forward`) and European FX options (`price_fx_option`), including swaption calibration. Defines the `LGMParams` and `FXLGMParams` dataclasses.
+    *   [`utils.py`](file:///d:/Projects/XvaSim/src/xvasim/utils.py): Utility functions, including date-to-tenor conversion (`dates_to_years`).
 *   `tests/`
     *   [`test_cva_engine.py`](file:///d:/Projects/XvaSim/tests/test_cva_engine.py): Unit test suite covering all aspects of the CVA engine and model calibration.
+    *   [`test_pricing_engine.py`](file:///d:/Projects/XvaSim/tests/test_pricing_engine.py): Unit tests for the LGM pricing engine (helpers, forward convergence, put-call parity, calibration round-trip).
+    *   [`test_utils.py`](file:///d:/Projects/XvaSim/tests/test_utils.py): Unit tests for utility functions (date-to-years conversion).
 *   `pyproject.toml`: Modern Python project configuration specifying package metadata, Python versions (>= 3.14), dependencies, and developer tools (`ruff`, `mypy`, `pyrefly`).
 
 ---
@@ -135,9 +174,11 @@ uv sync
 
 ---
 
-## 💡 Quick Start Example
+## 💡 Quick Start Examples
 
-Here is an example showing how to calibrate the model to market spreads, compute marginal default probabilities, and run a CVA calculation.
+### CVA Calculation
+
+Calibrate the CIR credit model to market spreads, compute marginal default probabilities, and run a CVA calculation.
 
 ```python
 import numpy as np
@@ -184,6 +225,78 @@ cva = compute_cva(
 )
 
 print(f"\nCalculated Portfolio CVA: {cva:.6f}")
+```
+
+### FX Option Pricing with LGM Model
+
+Calibrate the LGM volatility to swaptions, build a two-currency model, and price a European FX call option via Monte Carlo.
+
+```python
+import numpy as np
+from xvasim import (
+    LGMParams, FXLGMParams, OptionType,
+    calibrate_lgm_to_swaptions, price_fx_option,
+)
+
+# 1. Discount curves (flat 3% domestic, 1% foreign)
+curve_yrs = np.array([0.0, 1.0, 2.0, 5.0, 10.0, 30.0])
+dom_dfs = np.exp(-0.03 * curve_yrs)
+for_dfs = np.exp(-0.01 * curve_yrs)
+
+# 2. Calibrate domestic LGM to swaption normal vols
+#    (expiry × tenor pairs with market Bachelier vols)
+expiries = np.array([1.0, 2.0, 5.0])        # swaption expiries (years)
+swap_tenors = np.array([5.0, 5.0, 5.0])     # underlying swap tenors
+market_vols = np.array([0.0050, 0.0055, 0.0060])  # normal vols (annualised)
+fixed_rates = np.full(3, 0.03)               # ATM swap rates
+
+dom_lgm = calibrate_lgm_to_swaptions(
+    swaption_expiries_yrs=expiries,
+    swap_tenors_yrs=swap_tenors,
+    market_normal_vols_ann=market_vols,
+    curve_yrs=curve_yrs,
+    curve_dfs=dom_dfs,
+    fixed_rates_ann=fixed_rates,
+    kappa_ann=0.03,
+)
+print("Calibrated domestic σ(t):", dom_lgm.sigma_values_ann)
+
+# 3. Foreign LGM (use pre-calibrated constant σ for simplicity)
+for_lgm = LGMParams(
+    kappa_ann=0.03,
+    sigma_grid_yrs=np.array([30.0]),
+    sigma_values_ann=np.array([0.008]),
+    discount_curve_yrs=curve_yrs,
+    discount_factors=for_dfs,
+)
+
+# 4. Assemble two-currency FX model
+fx_params = FXLGMParams(
+    domestic=dom_lgm,
+    foreign=for_lgm,
+    spot_fx=1.10,        # e.g. EUR/USD
+    fx_vol_ann=0.10,     # 10% FX vol
+    correlation_matrix=np.array([
+        [1.0,  0.3, -0.2],   # dom_rate
+        [0.3,  1.0,  0.1],   # for_rate
+        [-0.2, 0.1,  1.0],   # fx_spot
+    ]),
+)
+
+# 5. Price a 1-year European FX call option
+result = price_fx_option(
+    params=fx_params,
+    strike=1.12,
+    maturity_yrs=1.0,
+    notional=1_000_000,
+    option_type=OptionType.CALL,
+    n_paths=100_000,
+    n_steps=100,
+    seed=42,
+)
+
+print(f"FX Call Price: {result['price']:,.2f}")
+print(f"Std Error:     {result['std_error']:,.2f}")
 ```
 
 ---

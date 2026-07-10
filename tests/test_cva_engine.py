@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 
 from xvasim.cva_engine import (
+    CIRParams,
     _cir_survival_probability,
     compute_cva,
     compute_marginal_pd,
@@ -57,29 +58,29 @@ class TestCvaEngine(unittest.TestCase):
 
 
 class TestCirSurvivalProbability(unittest.TestCase):
+    """Tests for the CIR survival probability closed-form solution."""
+
+    _DEFAULT_PARAMS = CIRParams(
+        kappa_ann=0.5, theta_ann=0.03, sigma_ann=0.1, lambda_0_ann=0.02
+    )
+
     def test_survival_probability_at_time_zero(self) -> None:
         """At t=0, survival probability should be 1.0."""
         tenors_yrs = np.array([0.0])
-        surv = _cir_survival_probability(
-            tenors_yrs, kappa_ann=0.5, theta_ann=0.03, sigma_ann=0.1, lambda_0_ann=0.02
-        )
+        surv = _cir_survival_probability(tenors_yrs, self._DEFAULT_PARAMS)
         np.testing.assert_allclose(surv, [1.0], atol=1e-10)
 
     def test_survival_probability_decreasing(self) -> None:
         """Survival probability should decrease with tenor."""
         tenors_yrs = np.array([0.5, 1.0, 2.0, 5.0, 10.0])
-        surv = _cir_survival_probability(
-            tenors_yrs, kappa_ann=0.5, theta_ann=0.03, sigma_ann=0.1, lambda_0_ann=0.02
-        )
+        surv = _cir_survival_probability(tenors_yrs, self._DEFAULT_PARAMS)
         for i in range(len(surv) - 1):
             self.assertGreater(surv[i], surv[i + 1])
 
     def test_survival_probability_bounded(self) -> None:
         """Survival probabilities should be in (0, 1]."""
         tenors_yrs = np.array([0.25, 0.5, 1.0, 2.0, 3.0, 5.0])
-        surv = _cir_survival_probability(
-            tenors_yrs, kappa_ann=0.5, theta_ann=0.03, sigma_ann=0.1, lambda_0_ann=0.02
-        )
+        surv = _cir_survival_probability(tenors_yrs, self._DEFAULT_PARAMS)
         self.assertTrue(np.all(surv > 0))
         self.assertTrue(np.all(surv <= 1.0))
 
@@ -142,6 +143,13 @@ class TestComputeMarginalPd(unittest.TestCase):
         marginal_pd = compute_marginal_pd(credit_spreads_ann, tenors_yrs)
         self.assertEqual(marginal_pd.shape, (1,))
         self.assertGreater(marginal_pd[0], 0.0)
+
+    def test_calibration_failure_raises_runtime_error(self) -> None:
+        """CIR calibration should raise RuntimeError if optimization fails."""
+        tenors_yrs = np.array([np.nan])
+        credit_spreads_ann = np.array([0.02])
+        with self.assertRaises(RuntimeError):
+            compute_marginal_pd(credit_spreads_ann, tenors_yrs)
 
 
 if __name__ == "__main__":

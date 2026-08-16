@@ -11,7 +11,13 @@ from xvasim.pricing_engine import (
     _compute_h_function,
     _compute_zeta,
     _interpolate_discount_factor,
+    benchmark_price_foreign_exchange_forward,
+    benchmark_price_foreign_exchange_option,
+    benchmark_price_fx_forward,
+    benchmark_price_fx_option,
     calibrate_lgm_to_swaptions,
+    price_foreign_exchange_forward,
+    price_foreign_exchange_option,
     price_fx_forward,
     price_fx_option,
 )
@@ -127,7 +133,7 @@ class TestComputeZeta(unittest.TestCase):
         np.testing.assert_allclose(z, sigma**2 * t, rtol=1e-10)
 
     def test_t_before_end_of_multi_segment_grid(self) -> None:
-        """Test _compute_zeta where t is smaller than the grid max, hitting the early break."""
+        """Test _compute_zeta where t is smaller than the grid max."""
         grid = np.array([1.0, 2.0, 5.0])
         vals = np.array([0.01, 0.02, 0.03])
         # t = 1.5. At index 2, s_start (1.5) >= t (1.5), so it should break.
@@ -169,14 +175,14 @@ class TestPriceFxForward(unittest.TestCase):
         params = _flat_fx_params(
             spot=1.10, dom_rate=0.03, for_rate=0.01, fx_vol=0.10, sigma=0.0001
         )
-        T = 1.0
+        maturity = 1.0
         # Analytical forward: F = S₀ Pf/Pd
-        fwd = params.spot_fx * np.exp(-(0.01 - 0.03) * T)
+        fwd = params.spot_fx * np.exp(-(0.01 - 0.03) * maturity)
 
         result = price_fx_forward(
             params,
             strike=fwd,
-            maturity_yrs=T,
+            maturity_yrs=maturity,
             notional=1.0,
             n_paths=200_000,
             n_steps=100,
@@ -190,16 +196,16 @@ class TestPriceFxForward(unittest.TestCase):
         params = _flat_fx_params(
             spot=1.10, dom_rate=0.03, for_rate=0.01, fx_vol=0.10, sigma=0.0001
         )
-        T = 1.0
-        K = 1.05
-        fwd = params.spot_fx * np.exp(-(0.01 - 0.03) * T)
+        maturity = 1.0
+        strike_k = 1.05
+        fwd = params.spot_fx * np.exp(-(0.01 - 0.03) * maturity)
         # Analytical PV = (F - K) × Pd(0,T)
-        analytical = (fwd - K) * np.exp(-0.03 * T)
+        analytical = (fwd - strike_k) * np.exp(-0.03 * maturity)
 
         result = price_fx_forward(
             params,
-            strike=K,
-            maturity_yrs=T,
+            strike=strike_k,
+            maturity_yrs=maturity,
             notional=1.0,
             n_paths=200_000,
             n_steps=100,
@@ -207,6 +213,25 @@ class TestPriceFxForward(unittest.TestCase):
         )
         # Should be within a few std errors
         self.assertAlmostEqual(result["price"], analytical, delta=0.01)
+
+    def test_benchmark_fx_forward(self) -> None:
+        """benchmark_price_fx_forward matches analytical covered interest parity."""
+        params = _flat_fx_params(
+            spot=1.10, dom_rate=0.03, for_rate=0.01, fx_vol=0.10, sigma=0.0001
+        )
+        maturity = 2.0
+        strike_k = 1.05
+        fwd_expected = params.spot_fx * np.exp(-(0.01 - 0.03) * maturity)
+        expected_pv = (fwd_expected - strike_k) * np.exp(-0.03 * maturity)
+
+        bench = benchmark_price_fx_forward(
+            params,
+            strike=strike_k,
+            maturity_yrs=maturity,
+            notional=1.0,
+        )
+        self.assertAlmostEqual(bench["price"], expected_pv, places=6)
+        self.assertAlmostEqual(bench["forward_fx"], fwd_expected, places=6)
 
 
 # -----------------------------------------------------------------------
@@ -250,13 +275,13 @@ class TestPriceFxOption(unittest.TestCase):
         params = _flat_fx_params(
             spot=1.10, dom_rate=0.03, for_rate=0.01, fx_vol=0.10, sigma=0.0001
         )
-        T = 1.0
-        K = 1.08
+        maturity = 1.0
+        strike_k = 1.08
 
         call = price_fx_option(
             params,
-            strike=K,
-            maturity_yrs=T,
+            strike=strike_k,
+            maturity_yrs=maturity,
             notional=1.0,
             option_type=OptionType.CALL,
             n_paths=200_000,
@@ -265,8 +290,8 @@ class TestPriceFxOption(unittest.TestCase):
         )
         put = price_fx_option(
             params,
-            strike=K,
-            maturity_yrs=T,
+            strike=strike_k,
+            maturity_yrs=maturity,
             notional=1.0,
             option_type=OptionType.PUT,
             n_paths=200_000,
@@ -274,8 +299,8 @@ class TestPriceFxOption(unittest.TestCase):
             seed=99,
         )
 
-        fwd = params.spot_fx * np.exp(-(0.01 - 0.03) * T)
-        pv_fwd_minus_k = (fwd - K) * np.exp(-0.03 * T)
+        fwd = params.spot_fx * np.exp(-(0.01 - 0.03) * maturity)
+        pv_fwd_minus_k = (fwd - strike_k) * np.exp(-0.03 * maturity)
 
         # C - P ≈ PV(F - K)
         diff = call["price"] - put["price"]
@@ -341,7 +366,48 @@ class TestPriceFxOption(unittest.TestCase):
         )
         self.assertIn("price", result)
         self.assertIn("std_error", result)
+        self.assertIn("analytical_benchmark_price", result)
         self.assertIn("fx_terminal", result)
+
+    def test_benchmark_fx_option(self) -> None:
+        """benchmark_price_fx_option computes closed-form benchmark."""
+        params = _flat_fx_params(
+            spot=1.10, dom_rate=0.03, for_rate=0.01, fx_vol=0.10, sigma=0.0001
+        )
+        bench = benchmark_price_fx_option(
+            params,
+            strike=1.10,
+            maturity_yrs=1.0,
+            notional=1.0,
+            option_type=OptionType.CALL,
+        )
+        self.assertIn("price", bench)
+        self.assertGreater(bench["price"], 0.0)
+        self.assertIn("forward_fx", bench)
+
+    def test_fully_expanded_and_alias_equivalence(self) -> None:
+        """Verify that fully expanded function names match alias functions."""
+        self.assertIs(price_fx_forward, price_foreign_exchange_forward)
+        self.assertIs(
+            benchmark_price_fx_forward,
+            benchmark_price_foreign_exchange_forward,
+        )
+        self.assertIs(price_fx_option, price_foreign_exchange_option)
+        self.assertIs(
+            benchmark_price_fx_option,
+            benchmark_price_foreign_exchange_option,
+        )
+
+        params = _flat_fx_params(
+            spot=1.20, dom_rate=0.03, for_rate=0.01, fx_vol=0.12, sigma=0.001
+        )
+        res_exp = price_foreign_exchange_forward(
+            params, strike=1.20, maturity_yrs=1.0, notional=100.0, n_paths=1000, seed=42
+        )
+        res_alias = price_fx_forward(
+            params, strike=1.20, maturity_yrs=1.0, notional=100.0, n_paths=1000, seed=42
+        )
+        self.assertEqual(res_exp["price"], res_alias["price"])
 
 
 # -----------------------------------------------------------------------
@@ -471,7 +537,7 @@ class TestCalibrateLgmToSwaptions(unittest.TestCase):
         expiries = np.array([1.0])
         swap_tenors = np.array([5.0])
         fixed_rates = np.array([0.03])
-        # A extremely high market vol (e.g. 10.0) cannot be matched by LGM [1e-6, 2.0] vol bounds.
+        # High market vol cannot be matched by LGM [1e-6, 2.0] vol bounds.
         market_vols = np.array([10.0])
 
         with self.assertRaises(RuntimeError):

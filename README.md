@@ -4,171 +4,229 @@
 
 # XvaSim: Valuation Adjustment (XVA) Simulation & Calculation Engine
 
-`XvaSim` is a lightweight, high-performance Python library designed for simulating and calculating credit and valuation adjustments (XVAs). The library provides:
-
-*   **Credit Valuation Adjustment (CVA)** — Cox-Ingersoll-Ross (CIR) credit model calibration and path-wise aggregation.
-*   **FX Derivative Pricing Engine** — Monte Carlo pricing of currency forwards (`price_fx_forward`) and European currency options (`price_fx_option`) using a two-currency **Linear Gauss-Markov (LGM)** model calibrated to swaption market data.
+`XvaSim` is a high-performance Python library designed for simulating and calculating credit and valuation adjustments (XVAs) and pricing multi-asset derivatives across Interest Rates, Foreign Exchange (FX), Credit, and Inflation risk factors.
 
 ---
 
-## 🏗️ System Architecture & Workflow
+## 🎯 Core Pricing Philosophy: Monte Carlo as Primary Pricer
 
-The workflow of the CVA engine consists of two main phases: **Credit Model Calibration** (using `CIRParams`) and **Path Aggregation**.
+> [!IMPORTANT]
+> **Monte Carlo Simulation is the primary pricing engine across `XvaSim`.**
+> All public pricing functions (`price_*`) execute stochastic path simulations by default, computing path-wise discounted cash flows, simulated present values, standard errors, and terminal distributions.
+> 
+> **Analytical closed-form solutions (`benchmark_price_*`) are provided strictly as mathematical benchmarks** to validate, test, and verify the accuracy and convergence of the Monte Carlo simulation engine.
+
+Every primary pricer returns both the simulated Monte Carlo price (`"price"` and `"std_error"`) and the exact analytical benchmark (`"analytical_benchmark_price"`).
+
+---
+
+## 📊 Supported Securities & Simulated Risk Factors
+
+The following table summarizes all financial instruments and valuation adjustments supported by `XvaSim`, including the primary Monte Carlo pricer, dedicated analytical benchmark function, and the underlying simulated risk factors:
+
+| Security / Instrument | Asset Class / Category | Primary MC Pricer (`price_*`) | Analytical Benchmark (`benchmark_price_*`) | Simulated Risk Factors | Description & Payoff Structure |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Vanilla Interest Rate Swap (IRS)** | Rates | `price_interest_rate_swap` / `price_irs` | `benchmark_price_interest_rate_swap` / `benchmark_price_irs` | Domestic Interest Rate $r_d(t)$ | Single-currency fixed-for-floating interest rate swap. Pays fixed/floating coupons on preset schedule. Computes par swap rate & forward annuity (PV01). |
+| **Cross-Currency Swap (XCCY)** | Rates / FX | `price_cross_currency_swap` / `price_xccy_swap` | `benchmark_price_cross_currency_swap` / `benchmark_price_xccy_swap` | Domestic IR $r_d(t)$, Foreign IR $r_f(t)$, Spot FX $S(t)$ | Multi-currency swap supporting fixed-for-floating, fixed-for-fixed, and floating-for-floating basis swaps with optional principal notional exchanges. |
+| **FX Forward** | FX | `price_fx_forward` | `benchmark_price_fx_forward` | Domestic IR $r_d(t)$, Foreign IR $r_f(t)$, Spot FX $S(t)$ | Forward exchange contract: $N \times (S(T) - K)$ priced under domestic risk-neutral measure with Covered Interest Parity (CIP) benchmark. |
+| **European FX Option (Call / Put)** | FX | `price_fx_option` | `benchmark_price_fx_option` | Spot FX $S(t)$, Domestic IR $r_d(t)$, Foreign IR $r_f(t)$, FX Variance $v(t)$ (Heston) | Vanilla European option on FX spot: $N \times \max(\omega(S(T) - K), 0)$ benchmarked against Garman-Kohlhagen / Black-76 / Heston semi-analytical formulas. |
+| **Zero-Coupon Inflation Swap (ZCIS)** | Inflation | `price_zero_coupon_inflation_swap` | `benchmark_price_zero_coupon_inflation_swap` | Nominal IR $r_n(t)$, Real IR $r_r(t)$, CPI Index $I(t)$ | Single-exchange swap at maturity: pays fixed compounded rate $(1+K)^T - 1$ vs floating realized inflation index return $I(T)/I(0) - 1$. |
+| **Year-on-Year Inflation Swap (YoY)** | Inflation | `price_yoy_inflation_swap` | Interpolated CPI forward projection | Nominal IR $r_n(t)$, Real IR $r_r(t)$, CPI Index $I(t)$ | Multi-period swap exchanging annual fixed rate $K$ for annual CPI growth $\frac{I(T_i)}{I(T_{i-1})} - 1$ on each reset date. |
+| **CPI Index Option (Caplet / Floorlet)** | Inflation | `price_cpi_option` | `benchmark_price_cpi_option` | Nominal IR $r_n(t)$, Real IR $r_r(t)$, CPI Index $I(t)$ | European option on inflation index: Caplet $N \times \max\left(\frac{I(T)}{I(0)} - (1+K)^T, 0\right)$ and Floorlet $N \times \max\left((1+K)^T - \frac{I(T)}{I(0)}, 0\right)$. |
+| **Portfolio Credit Valuation Adjustment (CVA)** | Credit / Multi-Asset | `compute_cva` | Marginal PD via CIR zero-curve | Credit Hazard Rate $\lambda(t)$, Underlying Portfolio Exposure | Path-wise Monte Carlo integration of counterparty default risk across simulated market exposure paths, discount factors, and marginal default probabilities. |
+
+---
+
+## 🎲 Supported Risk Factors & Stochastic Models
+
+`XvaSim` features a modular dynamic registry (`ModelRegistry`) and factories (`create_ir_model`, `create_credit_model`, `create_fx_model`, `create_inflation_model`) allowing plug-and-play selection of stochastic models for each simulated risk factor:
+
+| Risk Factor | Supported Stochastic Models | Model Registry Key | Concrete Class | Key Parameters |
+| :--- | :--- | :--- | :--- | :--- |
+| **Domestic / Foreign Interest Rate** | Linear Gauss-Markov (LGM) | `"lgm"` | `LGMModel` | $\kappa_{\text{ann}}$, $\sigma(t)_{\text{ann}}$, Discount Curve |
+| | Hull-White 1-Factor (HW1F) | `"hull_white"` | `HullWhite1FModel` | $a_{\text{ann}}$, $\sigma_{\text{ann}}$, Discount Curve |
+| | Vasicek Short Rate | `"vasicek"` | `VasicekModel` | $\kappa_{\text{ann}}$, $\theta_{\text{ann}}$, $\sigma_{\text{ann}}$, $r_0$ |
+| | Cox-Ingersoll-Ross (CIR) | `"cir"` | `CIRInterestRateModel` | $\kappa_{\text{ann}}$, $\theta_{\text{ann}}$, $\sigma_{\text{ann}}$, $r_0$ |
+| **Foreign Exchange (FX Spot & Volatility)** | Two-Currency Multi-Factor FX | `"two_currency"` | `TwoCurrencyFXModel` | Domestic IR Model, Foreign IR Model, $S_0$, $\sigma_{\text{fx}}$, Correlation Matrix |
+| | Garman-Kohlhagen / Black FX | `"garman_kohlhagen"` | `GarmanKohlhagenFXModel` | $r_d$, $r_f$, $S_0$, $\sigma_{\text{fx}}$ |
+| | Heston Stochastic Volatility FX | `"heston"` | `HestonFXModel` | $r_d$, $r_f$, $S_0$, $v_0$, $\kappa_v$, $\theta_v$, $\sigma_v$, $\rho_{S,v}$ |
+| **Counterparty Credit / Hazard Rate** | Cox-Ingersoll-Ross (CIR) Hazard Rate | `"cir"` | `CIRHazardRateModel` | $\kappa_{\text{ann}}$, $\theta_{\text{ann}}$, $\sigma_{\text{ann}}$, $\lambda_0$ |
+| **Inflation (CPI Index & Real Rates)** | Jarrow-Yildirim (JY) Two-Economy | `"jarrow_yildirim"` | `JarrowYildirimModel` | Nominal HW1F, Real HW1F, $I_0$, $\sigma_I$, $3 \times 3$ Correlation Matrix |
+| | Black CPI Forward Log-Normal | `"black_inflation"` | `BlackInflationModel` | Nominal Curve, Real Curve, $I_0$, $\sigma_{I,\text{ann}}$ |
+
+---
+
+## 🧮 Mathematical Foundations & Stochastic Differential Equations (SDEs)
+
+### 1. Interest Rate Models
+
+#### Linear Gauss-Markov (LGM) Model
+The LGM state variable $x(t)$ evolves as a zero-mean Gaussian diffusion:
+
+$$dx(t) = -\kappa\,x(t)\,dt + \sigma(t)\,dW(t), \quad x(0) = 0$$
+
+The zero-coupon bond price $P(t, T)$ under the domestic numeraire is given by:
+
+$$P(t,T) = \frac{P(0,T)}{P(0,t)}\exp\!\left(-H(T)\,x(t) - \tfrac{1}{2}\bigl(H(T)^2 - H(t)^2\bigr)\zeta(t)\right)$$
+
+where:
+$$H(t) = \frac{1 - e^{-\kappa t}}{\kappa}, \quad \zeta(t) = \int_0^t \sigma(s)^2 e^{-2\kappa(t-s)} ds$$
+
+#### Hull-White 1-Factor (HW1F) Model
+Exact term-structure fitting Gaussian short-rate model under the risk-neutral measure $\mathbb{Q}$:
+
+$$dr(t) = (\theta(t) - a r(t))\,dt + \sigma\,dW(t)$$
+
+where $\theta(t) = \frac{\partial f(0,t)}{\partial t} + a f(0,t) + \frac{\sigma^2}{2a}(1 - e^{-2at})$ fits the initial zero-coupon discount curve $P(0, t)$, with analytical bond price:
+
+$$P(t, T) = A(t, T)\exp(-B(t, T) r(t)), \quad B(t, T) = \frac{1 - e^{-a(T-t)}}{a}$$
+
+#### Vasicek Short-Rate Model
+Mean-reverting Ornstein-Uhlenbeck short-rate process:
+
+$$dr(t) = \kappa(\theta - r(t))\,dt + \sigma\,dW(t)$$
+
+#### Cox-Ingersoll-Ross (CIR) Interest Rate Model
+Mean-reverting square-root diffusion guaranteeing non-negative interest rates when the Feller condition $2\kappa\theta \ge \sigma^2$ holds:
+
+$$dr(t) = \kappa(\theta - r(t))\,dt + \sigma\sqrt{r(t)}\,dW(t)$$
+
+---
+
+### 2. Foreign Exchange (FX) Models
+
+#### Garman-Kohlhagen (Black-Scholes FX) Model
+Under the domestic risk-neutral measure $\mathbb{Q}_d$, the spot exchange rate $S(t)$ (domestic currency per unit foreign currency) evolves as:
+
+$$\frac{dS(t)}{S(t)} = (r_d(t) - r_f(t))\,dt + \sigma_{\text{fx}}\,dW(t)$$
+
+The closed-form analytical benchmark for European call ($C$) and put ($P$) options is:
+
+$$C = P_d(0, T) \left[ F\,N(d_1) - K\,N(d_2) \right], \quad P = P_d(0, T) \left[ K\,N(-d_2) - F\,N(-d_1) \right]$$
+
+where $F = S_0 \frac{P_f(0, T)}{P_d(0, T)}$ and $d_1 = \frac{\ln(F/K) + \frac{1}{2}\sigma_{\text{fx}}^2 T}{\sigma_{\text{fx}}\sqrt{T}}, \; d_2 = d_1 - \sigma_{\text{fx}}\sqrt{T}$.
+
+#### Heston Stochastic Volatility FX Model
+Captures volatility smile and skew by modeling instantaneous FX variance $v(t)$ as a CIR process:
+
+$$\frac{dS(t)}{S(t)} = (r_d(t) - r_f(t))\,dt + \sqrt{v(t)}\,dW_S(t)$$
+
+$$dv(t) = \kappa_v (\theta_v - v(t))\,dt + \sigma_v \sqrt{v(t)}\,dW_v(t)$$
+
+with instantaneous Brownian motion correlation:
+$$d\langle W_S, W_v \rangle_t = \rho_{S, v}\,dt$$
+
+#### Two-Currency Multi-Factor FX Model
+Couples stochastic domestic interest rates $r_d(t)$, foreign interest rates $r_f(t)$ under the domestic pricing measure with a quanto drift adjustment, and the spot FX rate $S(t)$ with a $3 \times 3$ correlation structure:
+
+$$\begin{pmatrix} dW_d(t) \\ dW_f(t) \\ dW_S(t) \end{pmatrix} \sim \mathcal{N}\left(\mathbf{0}, \begin{pmatrix} 1 & \rho_{d, f} & \rho_{d, S} \\ \rho_{d, f} & 1 & \rho_{f, S} \\ \rho_{d, S} & \rho_{f, S} & 1 \end{pmatrix} dt \right)$$
+
+Under the domestic risk-neutral measure $\mathbb{Q}_d$, the foreign short rate acquires a quanto adjustment:
+$$dr_f(t) = \left( \theta_f(t) - a_f r_f(t) - \rho_{f, S} \sigma_f(t) \sigma_{\text{fx}} \right) dt + \sigma_f(t)\,dW_f^{\mathbb{Q}_d}(t)$$
+
+---
+
+### 3. Counterparty Credit & Hazard Rate Models
+
+#### Cox-Ingersoll-Ross (CIR) Hazard Rate Model
+The stochastic default intensity (hazard rate) $\lambda(t)$ is modeled as:
+
+$$d\lambda(t) = \kappa(\theta - \lambda(t))\,dt + \sigma\sqrt{\lambda(t)}\,dW(t)$$
+
+The closed-form survival probability curve is:
+
+$$P_{\text{surv}}(0, t) = \mathbb{E}\left[\exp\left(-\int_0^t \lambda(s)\,ds\right)\right] = A(t)\exp(-B(t)\lambda_0)$$
+
+where:
+$$\gamma = \sqrt{\kappa^2 + 2\sigma^2}, \quad B(t) = \frac{2(e^{\gamma t} - 1)}{(\gamma + \kappa)(e^{\gamma t} - 1) + 2\gamma}, \quad A(t) = \left[ \frac{2\gamma e^{(\kappa + \gamma)t/2}}{(\gamma + \kappa)(e^{\gamma t} - 1) + 2\gamma} \right]^{\frac{2\kappa\theta}{\sigma^2}}$$
+
+#### Path-Wise Credit Valuation Adjustment (CVA)
+$$\text{CVA} = \text{LGD} \times \frac{1}{N_{\text{paths}}} \sum_{i=1}^{N_{\text{paths}}} \sum_{j=1}^{N_{\text{dates}}} \text{Exposure}_{i,j} \times \Delta \text{PD}_{i,j} \times D_{i,j}$$
+
+---
+
+### 4. Inflation Models
+
+#### Jarrow-Yildirim (JY) Two-Economy Inflation Model
+Under the nominal risk-neutral measure $\mathbb{Q}_n$, the nominal rate $r_n(t)$, real rate $r_r(t)$, and CPI index $I(t)$ evolve as a correlated 3-factor system:
+
+$$dr_n(t) = (\theta_n(t) - a_n r_n(t))\,dt + \sigma_n\,dW_n(t)$$
+
+$$dr_r(t) = \left( \theta_r(t) - a_r r_r(t) - \rho_{r, I} \sigma_r \sigma_I \right) dt + \sigma_r\,dW_r(t)$$
+
+$$\frac{dI(t)}{I(t)} = (r_n(t) - r_r(t))\,dt + \sigma_I\,dW_I(t)$$
+
+with cross-correlations $\rho_{n, r}$, $\rho_{n, I}$, and $\rho_{r, I}$.
+
+#### Black CPI Forward Log-Normal Model
+Under the $T$-forward nominal measure $\mathbb{Q}_n^T$, the forward CPI index $F_I(t, T) = I(t)\frac{P_r(t, T)}{P_n(t, T)}$ is a martingale:
+
+$$\frac{dF_I(t, T)}{F_I(t, T)} = \sigma_I\,dW_I^T(t)$$
+
+Analytical Zero-Coupon Inflation Swap fair rate:
+$$S_0(T) = \left( \frac{P_r(0, T)}{P_n(0, T)} \right)^{1/T} - 1$$
+
+---
+
+## 🏗️ System Architecture
 
 ```mermaid
 graph TD
-    %% Inputs
-    subgraph Market Data
-        Spreads[Market Credit Spreads <br> credit_spreads_ann]
-        Tenors[Tenor Dates / Maturities in years <br> tenors_yrs]
+    subgraph Modular Models ["Modular Stochastic Models (xvasim.models)"]
+        Registry[ModelRegistry & Dynamic Factories <br> create_ir_model, create_fx_model, create_credit_model, create_inflation_model]
+        IR[InterestRateModel ABC]
+        FX[FXModel ABC]
+        Credit[CreditModel ABC]
+        Inf[InflationModel ABC]
+        
+        IR --> LGM[LGMModel]
+        IR --> HW[HullWhite1FModel]
+        IR --> Vas[VasicekModel]
+        IR --> CIR_IR[CIRInterestRateModel]
+        
+        FX --> TwoCurr[TwoCurrencyFXModel]
+        FX --> GK[GarmanKohlhagenFXModel]
+        FX --> Hest[HestonFXModel]
+        
+        Credit --> CIR_Credit[CIRHazardRateModel]
+        
+        Inf --> JY[JarrowYildirimModel]
+        Inf --> BlackInf[BlackInflationModel]
     end
 
-    subgraph Simulation / Portfolio Data
-        Exposure[Exposure Paths <br> shape: n_paths x n_dates]
-        DF[Discount Factors <br> shape: n_paths x n_dates]
-        LGD[Loss Given Default <br> scalar float]
+    subgraph Pricing Engines ["Pricing & Valuation Engines (xvasim)"]
+        MCPricers["Primary Monte Carlo Pricers <br> price_interest_rate_swap, price_cross_currency_swap <br> price_foreign_exchange_forward, price_foreign_exchange_option <br> price_zero_coupon_inflation_swap, price_year_on_year_inflation_swap, price_consumer_price_index_option"]
+        Benchmarks["Analytical Benchmarks <br> benchmark_price_interest_rate_swap, benchmark_price_cross_currency_swap <br> benchmark_price_foreign_exchange_forward, benchmark_price_foreign_exchange_option <br> benchmark_price_zero_coupon_inflation_swap, benchmark_price_consumer_price_index_option"]
+        CVAEngine["CVA Engine <br> compute_cva, compute_marginal_pd"]
     end
 
-    %% Process
-    Spreads --> Calibrate[CIR Calibration <br> L-BFGS-B Optimization]
-    Tenors --> Calibrate
-    
-    Calibrate --> Params[Calibrated CIR Parameters <br> kappa_ann, theta_ann, sigma_ann, lambda_0_ann]
-    Params --> SurvProb[Survival Probability Curve <br> P_surv t]
-    
-    SurvProb --> CumPD[Cumulative PD Curve <br> F t = 1 - P_surv t]
-    CumPD --> MargPD[Marginal PDs <br> np.diff]
-    
-    MargPD --> CVACompute[CVA Aggregation Engine]
-    Exposure --> CVACompute
-    DF --> CVACompute
-    LGD --> CVACompute
-    
-    CVACompute --> Output[CVA Value <br> Expected CVA across paths]
-
-    %% Styling
-    style Calibrate fill:#2a7ae2,stroke:#fff,stroke-width:2px,color:#fff
-    style CVACompute fill:#2a7ae2,stroke:#fff,stroke-width:2px,color:#fff
-    style Output fill:#2ecc71,stroke:#fff,stroke-width:2px,color:#fff
+    Modular Models --> MCPricers
+    Modular Models --> Benchmarks
+    Modular Models --> CVAEngine
 ```
 
 ---
 
-## 📐 Units and Conventions
+## 📐 Units & Naming Conventions
 
-To prevent mismatch and errors, the following uniform conventions are strictly enforced across the codebase:
-*   **Time / Tenor**: Represented in **years** (suffix: `_yrs`, e.g., `tenors_yrs`). A 6-month tenor is represented as `0.5`.
-*   **Rates / Spreads**: Represented as **annualized decimal values** (suffix: `_ann`, e.g., `credit_spreads_ann`, `lambda_0_ann`). A spread of $2.5\%$ per annum is represented as `0.025`.
-
----
-
-## 🧮 Mathematical Foundations
-
-### 1. The Hazard Rate Process (CIR Model)
-The default intensity (hazard rate) $\lambda_t$ of the counterparty is modeled using the stochastic **Cox-Ingersoll-Ross (CIR)** process:
-
-$$d\lambda_t = \kappa_{\text{ann}}(\theta_{\text{ann}} - \lambda_t)dt + \sigma_{\text{ann}}\sqrt{\lambda_t}dW_t$$
-
-Where:
-*   $\kappa_{\text{ann}}$: Annualized speed of mean reversion.
-*   $\theta_{\text{ann}}$: Annualized long-term mean hazard rate.
-*   $\sigma_{\text{ann}}$: Annualized volatility coefficient of the hazard rate process.
-*   $W_t$: Standard Brownian motion.
-
-### 2. Survival Probability
-Under the CIR model, the probability of the counterparty surviving up to time $t$ (in years) has a closed-form solution:
-
-$$P_{\text{surv}}(0, t) = A(t) e^{-B(t)\lambda_{0,\text{ann}}}$$
-
-Where $\gamma = \sqrt{\kappa_{\text{ann}}^2 + 2\sigma_{\text{ann}}^2}$ and:
-
-$$A(t) = \left[ \frac{2\gamma e^{(\kappa_{\text{ann}} + \gamma)t/2}}{(\kappa_{\text{ann}} + \gamma)(e^{\gamma t} - 1) + 2\gamma} \right]^{\frac{2\kappa_{\text{ann}}\theta_{\text{ann}}}{\sigma_{\text{ann}}^2}}$$
-
-$$B(t) = \frac{2(e^{\gamma t} - 1)}{(\kappa_{\text{ann}} + \gamma)(e^{\gamma t} - 1) + 2\gamma}$$
-
-### 3. Model-Implied Spreads & Calibration
-The model-implied annualized credit spread $S_{\text{model}}(t)$ for a given tenor $t$ (in years) is:
-
-$$S_{\text{model}}(t) = -\frac{\ln(P_{\text{surv}}(0, t))}{t}$$
-
-To calibrate the model, we minimize the sum of squared errors between the model-implied spreads and the observed market credit spreads (both annualized):
-
-$$\min_{\kappa_{\text{ann}}, \theta_{\text{ann}}, \sigma_{\text{ann}}, \lambda_{0,\text{ann}}} \sum_{k=1}^{M} \left( S_{\text{model}}(t_k) - S_{\text{market}}(t_k) \right)^2$$
-
-This multi-dimensional optimization is solved using the **L-BFGS-B** algorithm with parameter bounds to ensure stability ($\kappa_{\text{ann}}, \theta_{\text{ann}}, \sigma_{\text{ann}}, \lambda_{0,\text{ann}} > 0$).
-
-### 4. Credit Valuation Adjustment (CVA)
-CVA represents the expected loss due to counterparty default. The discrete CVA for simulated paths is calculated as:
-
-$$\text{CVA} = \text{LGD} \times \frac{1}{N_{\text{paths}}} \sum_{i=1}^{N_{\text{paths}}} \sum_{j=1}^{N_{\text{dates}}} \text{Exposure}_{i,j} \times \text{Marginal PD}_{i,j} \times D_{i,j}$$
-
-Where:
-*   $\text{LGD}$: Loss Given Default ($1 - \text{Recovery Rate}$).
-*   $\text{Exposure}_{i,j}$: Exposure of path $i$ at date $j$.
-*   $\text{Marginal PD}_{i,j}$: Marginal probability of default between date $j-1$ and $j$ for path $i$.
-*   $D_{i,j}$: Risk-free discount factor of path $i$ at date $j$.
-
----
-
-## 🧮 LGM Pricing Engine — Mathematical Foundations
-
-### 1. LGM State Variable
-The LGM state variable for each currency evolves under the risk-neutral measure as:
-
-$$dx(t) = -\kappa\,x(t)\,dt + \sigma(t)\,dW(t)$$
-
-where $\kappa$ is the mean-reversion speed and $\sigma(t)$ is a piecewise-constant volatility calibrated to swaptions.
-
-### 2. Discount Bond Prices
-The time-$t$ price of a zero-coupon bond maturing at $T$:
-
-$$P(t,T) = \frac{P(0,T)}{P(0,t)}\exp\!\left(-H(T)\,x(t) - \tfrac{1}{2}\bigl(H(T)^2 - H(t)^2\bigr)\zeta(t)\right)$$
-
-with $H(t) = \frac{1-e^{-\kappa t}}{\kappa}$ and $\zeta(t) = \int_0^t \sigma(s)^2 e^{-2\kappa(t-s)}ds$.
-
-### 3. Two-Currency FX Model
-The spot FX rate (domestic per foreign) follows:
-
-$$\frac{dS(t)}{S(t)} = (r_d(t) - r_f(t))\,dt + \sigma_{FX}\,dW_{FX}(t)$$
-
-with a quanto drift adjustment on the foreign LGM state to account for measure change.
-
-### 4. Swaption Calibration
-The piecewise-constant $\sigma(t)$ is bootstrapped expiry-by-expiry: for each swaption, a Brent root-finding step solves for the volatility segment that matches the market normal (Bachelier) price.
-
-### 5. FX Derivative Payoffs
-*   **Currency Forward**: $N \cdot (S(T) - K)$
-*   **Currency Call Option**: $N \cdot \max(S(T) - K, 0)$
-*   **Currency Put Option**: $N \cdot \max(K - S(T), 0)$
-
----
-
-## 📁 Codebase Structure
-
-*   `src/xvasim/`
-    *   [`__init__.py`](file:///d:/Projects/XvaSim/src/xvasim/__init__.py): Exposes package public APIs (`CIRParams`, `compute_cva`, `compute_marginal_pd`, `dates_to_years`, `LGMParams`, `FXLGMParams`, `calibrate_lgm_to_swaptions`, `price_fx_forward`, `price_fx_option`).
-    *   [`cva_engine.py`](file:///d:/Projects/XvaSim/src/xvasim/cva_engine.py): Core algorithms for CVA computation, CIR survival probability calculation (using the `CIRParams` dataclass), calibration, and marginal default probabilities.
-    *   [`pricing_engine.py`](file:///d:/Projects/XvaSim/src/xvasim/pricing_engine.py): LGM-based Monte Carlo pricing engine for currency forwards (`price_fx_forward`) and European FX options (`price_fx_option`), including swaption calibration. Defines the `LGMParams` and `FXLGMParams` dataclasses.
-    *   [`utils.py`](file:///d:/Projects/XvaSim/src/xvasim/utils.py): Utility functions, including date-to-tenor conversion (`dates_to_years`).
-*   `tests/`
-    *   [`test_cva_engine.py`](file:///d:/Projects/XvaSim/tests/test_cva_engine.py): Unit test suite covering all aspects of the CVA engine and model calibration.
-    *   [`test_pricing_engine.py`](file:///d:/Projects/XvaSim/tests/test_pricing_engine.py): Unit tests for the LGM pricing engine (helpers, forward convergence, put-call parity, calibration round-trip).
-    *   [`test_utils.py`](file:///d:/Projects/XvaSim/tests/test_utils.py): Unit tests for utility functions (date-to-years conversion).
-*   `pyproject.toml`: Modern Python project configuration specifying package metadata, Python versions (>= 3.14), dependencies, and developer tools (`ruff`, `mypy`, `pyrefly`).
+Strictly enforced across all public APIs and parameters:
+*   **Time & Tenors**: Must use suffix `_yrs` (e.g. `maturity_yrs`, `tenors_yrs`, `pay_freq_yrs`). 6 months = `0.5`.
+*   **Rates, Volatilities & Spreads**: Must use suffix `_ann` (e.g. `kappa_ann`, `sigma_ann`, `fx_vol_ann`, `cpi_vol_ann`). 2.5% = `0.025`.
 
 ---
 
 ## 🚀 Installation & Setup
 
-This project uses [uv](https://github.com/astral-sh/uv) for fast, reliable package and environment management.
+This project uses [uv](https://github.com/astral-sh/uv) for fast, deterministic package management.
 
 ### Prerequisites
 *   Python >= 3.14
 *   `uv` installed on your system.
 
-### Install Dependencies
-Initialize the virtual environment and install dependencies:
 ```bash
+# Clone & install dependencies
+git clone https://github.com/osp709/XvaSim.git
+cd XvaSim
 uv sync
 ```
 
@@ -176,147 +234,186 @@ uv sync
 
 ## 💡 Quick Start Examples
 
-### CVA Calculation
+### 1. Pricing an Interest Rate Swap (Monte Carlo with Analytical Benchmark)
 
-Calibrate the CIR credit model to market spreads, compute marginal default probabilities, and run a CVA calculation.
+```python
+import numpy as np
+from xvasim import (
+    HullWhite1FModel,
+    benchmark_price_interest_rate_swap,
+    price_interest_rate_swap,
+)
+
+# 1. Calibrate initial discount curve
+tenors_yrs = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0])
+dfs = np.exp(-0.03 * tenors_yrs)
+
+# 2. Instantiate Hull-White 1-Factor model
+hw_model = HullWhite1FModel(
+    a_ann=0.03,
+    sigma_ann=0.01,
+    discount_curve_yrs=tenors_yrs,
+    discount_factors=dfs,
+)
+
+# 3. Price 5-year IRS via Monte Carlo (default 10,000 paths)
+mc_result = price_interest_rate_swap(
+    model=hw_model,
+    fixed_rate_ann=0.03,
+    tenor_yrs=5.0,
+    pay_freq_yrs=0.5,
+    notional=10_000_000.0,
+    is_payer=True,
+    n_paths=50_000,
+    seed=42,
+)
+
+# 4. Compute closed-form analytical benchmark
+bench_result = benchmark_price_interest_rate_swap(
+    model=hw_model,
+    fixed_rate_ann=0.03,
+    tenor_yrs=5.0,
+    pay_freq_yrs=0.5,
+    notional=10_000_000.0,
+    is_payer=True,
+)
+
+print(f"Monte Carlo Swap PV:    ${mc_result['price']:,.2f} ± ${mc_result['std_error']:,.2f}")
+print(f"Analytical Benchmark:   ${bench_result['price']:,.2f}")
+print(f"Fair Par Swap Rate:     {mc_result['fair_swap_rate']:.4%}")
+print(f"Forward Annuity (PV01): {mc_result['annuity']:,.4f}")
+```
+
+### 2. Pricing a Cross-Currency Swap (XCCY)
+
+```python
+from xvasim import (
+    HullWhite1FModel,
+    SwapLegType,
+    TwoCurrencyFXModel,
+    price_cross_currency_swap,
+)
+
+dom_ir = HullWhite1FModel(a_ann=0.03, sigma_ann=0.01, discount_curve_yrs=tenors_yrs, discount_factors=dfs)
+for_ir = HullWhite1FModel(a_ann=0.02, sigma_ann=0.008, discount_curve_yrs=tenors_yrs, discount_factors=np.exp(-0.015 * tenors_yrs))
+
+fx_model = TwoCurrencyFXModel(
+    domestic_ir_model=dom_ir,
+    foreign_ir_model=for_ir,
+    spot_fx=1.20,
+    fx_vol_ann=0.10,
+    correlation_matrix=np.array([
+        [ 1.0,  0.3, -0.1],
+        [ 0.3,  1.0,  0.2],
+        [-0.1,  0.2,  1.0],
+    ]),
+)
+
+xccy_res = price_cross_currency_swap(
+    model=fx_model,
+    domestic_rate_ann=0.03,
+    foreign_spread_ann=0.0,
+    domestic_leg_type=SwapLegType.FIXED,
+    foreign_leg_type=SwapLegType.FLOATING,
+    tenor_yrs=5.0,
+    foreign_notional=1_000_000.0,
+    exchange_notionals=True,
+    n_paths=30_000,
+    seed=42,
+)
+
+print(f"XCCY Simulated PV (USD): ${xccy_res['price']:,.2f} ± ${xccy_res['std_error']:,.2f}")
+print(f"Analytical Benchmark:    ${xccy_res['analytical_benchmark_price']:,.2f}")
+print(f"Fair Foreign Spread:     {xccy_res['fair_foreign_spread'] * 10_000:.2f} bps")
+```
+
+### 3. Pricing Inflation Derivatives (ZCIS & CPI Options)
+
+```python
+from xvasim import (
+    BlackInflationModel,
+    OptionType,
+    price_consumer_price_index_option,
+    price_zero_coupon_inflation_swap,
+)
+
+nom_dfs = np.exp(-0.035 * tenors_yrs)
+real_dfs = np.exp(-0.015 * tenors_yrs)
+
+inf_model = BlackInflationModel(
+    nominal_discount_curve_yrs=tenors_yrs,
+    nominal_discount_factors=nom_dfs,
+    real_discount_curve_yrs=tenors_yrs,
+    real_discount_factors=real_dfs,
+    base_cpi=100.0,
+    cpi_vol_ann=0.015,
+)
+
+# 1. Zero-Coupon Inflation Swap
+zcis_res = price_zero_coupon_inflation_swap(
+    model=inf_model,
+    strike_rate_ann=0.02,
+    maturity_yrs=5.0,
+    notional=1_000_000.0,
+    is_payer=True,
+)
+print(f"ZCIS Monte Carlo PV:    ${zcis_res['price']:,.2f} (Benchmark: ${zcis_res['analytical_benchmark_price']:,.2f})")
+print(f"Par Inflation Rate:     {zcis_res['fair_swap_rate']:.4%}")
+
+# 2. CPI Inflation Caplet Option
+cpi_opt = price_consumer_price_index_option(
+    model=inf_model,
+    strike_rate_ann=0.02,
+    maturity_yrs=3.0,
+    notional=100_000.0,
+    option_type=OptionType.CALL,
+)
+print(f"CPI Caplet Simulated PV: ${cpi_opt['price']:,.2f} (Benchmark: ${cpi_opt['analytical_benchmark_price']:,.2f})")
+```
+
+### 4. Portfolio CVA Simulation with CIR Credit Model
 
 ```python
 import numpy as np
 from xvasim import compute_cva, compute_marginal_pd, dates_to_years
 
-# 1. Dates & Valuation Date
 valuation_date = "2026-07-11"
 dates = ["2027-07-11", "2028-07-11", "2029-07-11", "2031-07-11", "2033-07-11", "2036-07-11"]
-
-# Convert dates to tenors (in years, based on 365.25 days/year)
 tenors_yrs = dates_to_years(dates, valuation_date)
+credit_spreads_ann = np.array([0.0150, 0.0180, 0.0210, 0.0250, 0.0270, 0.0300])
 
-# Market Credit Spreads (Annualized) corresponding to each date
-credit_spreads_ann = np.array([0.0150, 0.0180, 0.0210, 0.0250, 0.0270, 0.0300]) # e.g. 1.5% to 3.0% per annum
+# 1. Calibrate CIR hazard rate model & marginal default probabilities
+marginal_pds = compute_marginal_pd(credit_spreads_ann, tenors_yrs)
 
-# 2. Compute Marginal Default Probabilities via CIR Calibration
-# This function calibrates the CIR hazard rate process to the spreads and returns 
-# the marginal PD for each interval [t_{i-1}, t_i]
-marginal_pd_1d = compute_marginal_pd(credit_spreads_ann, tenors_yrs)
-print("Marginal Default Probabilities:", marginal_pd_1d)
-
-# 3. Simulate Portfolio Exposures and Discount Factors
-n_paths = 1000
+# 2. Generate simulated exposure paths
+n_paths = 5_000
 n_dates = len(tenors_yrs)
-
-# Generate mock exposure paths (positive part of mark-to-market values)
 np.random.seed(42)
-exposure = np.random.uniform(10.0, 100.0, size=(n_paths, n_dates))
+exposure = np.maximum(np.random.normal(loc=50_000.0, scale=15_000.0, size=(n_paths, n_dates)), 0.0)
+discount_factor = np.tile(np.exp(-0.03 * tenors_yrs), (n_paths, 1))
+marginal_pd_matrix = np.tile(marginal_pds, (n_paths, 1))
 
-# Flat risk-free rate of 3.0% per annum
-discount_factor_1d = np.exp(-0.03 * tenors_yrs)
-discount_factor = np.tile(discount_factor_1d, (n_paths, 1))
-
-# Broadcast marginal PDs to match path dimensionality
-marginal_pd = np.tile(marginal_pd_1d, (n_paths, 1))
-
-# 4. Compute CVA assuming LGD = 60%
-lgd = 0.60
+# 3. Compute Portfolio CVA
 cva = compute_cva(
     exposure=exposure,
-    marginal_pd=marginal_pd,
+    marginal_pd=marginal_pd_matrix,
     discount_factor=discount_factor,
-    loss_given_default=lgd
+    loss_given_default=0.60,
 )
-
-print(f"\nCalculated Portfolio CVA: {cva:.6f}")
-```
-
-### FX Option Pricing with LGM Model
-
-Calibrate the LGM volatility to swaptions, build a two-currency model, and price a European FX call option via Monte Carlo.
-
-```python
-import numpy as np
-from xvasim import (
-    LGMParams, FXLGMParams, OptionType,
-    calibrate_lgm_to_swaptions, price_fx_option,
-)
-
-# 1. Discount curves (flat 3% domestic, 1% foreign)
-curve_yrs = np.array([0.0, 1.0, 2.0, 5.0, 10.0, 30.0])
-dom_dfs = np.exp(-0.03 * curve_yrs)
-for_dfs = np.exp(-0.01 * curve_yrs)
-
-# 2. Calibrate domestic LGM to swaption normal vols
-#    (expiry × tenor pairs with market Bachelier vols)
-expiries = np.array([1.0, 2.0, 5.0])        # swaption expiries (years)
-swap_tenors = np.array([5.0, 5.0, 5.0])     # underlying swap tenors
-market_vols = np.array([0.0050, 0.0055, 0.0060])  # normal vols (annualised)
-fixed_rates = np.full(3, 0.03)               # ATM swap rates
-
-dom_lgm = calibrate_lgm_to_swaptions(
-    swaption_expiries_yrs=expiries,
-    swap_tenors_yrs=swap_tenors,
-    market_normal_vols_ann=market_vols,
-    curve_yrs=curve_yrs,
-    curve_dfs=dom_dfs,
-    fixed_rates_ann=fixed_rates,
-    kappa_ann=0.03,
-)
-print("Calibrated domestic σ(t):", dom_lgm.sigma_values_ann)
-
-# 3. Foreign LGM (use pre-calibrated constant σ for simplicity)
-for_lgm = LGMParams(
-    kappa_ann=0.03,
-    sigma_grid_yrs=np.array([30.0]),
-    sigma_values_ann=np.array([0.008]),
-    discount_curve_yrs=curve_yrs,
-    discount_factors=for_dfs,
-)
-
-# 4. Assemble two-currency FX model
-fx_params = FXLGMParams(
-    domestic=dom_lgm,
-    foreign=for_lgm,
-    spot_fx=1.10,        # e.g. EUR/USD
-    fx_vol_ann=0.10,     # 10% FX vol
-    correlation_matrix=np.array([
-        [1.0,  0.3, -0.2],   # dom_rate
-        [0.3,  1.0,  0.1],   # for_rate
-        [-0.2, 0.1,  1.0],   # fx_spot
-    ]),
-)
-
-# 5. Price a 1-year European FX call option
-result = price_fx_option(
-    params=fx_params,
-    strike=1.12,
-    maturity_yrs=1.0,
-    notional=1_000_000,
-    option_type=OptionType.CALL,
-    n_paths=100_000,
-    n_steps=100,
-    seed=42,
-)
-
-print(f"FX Call Price: {result['price']:,.2f}")
-print(f"Std Error:     {result['std_error']:,.2f}")
+print(f"Calculated Portfolio CVA: ${cva:,.2f}")
 ```
 
 ---
 
-## 🧪 Development & Testing
+## 🧪 Testing & Verification Commands
 
-### Running Tests
-To run the full test suite using `uv`:
 ```bash
+# Run full unit test suite
 uv run python -m unittest discover tests
+
+# Linting and formatting checks
+uv run ruff check .
+
+# Strict static type checking (mypy on Python 3.14)
+uv run mypy .
 ```
-
-### Code Quality Tools
-The project enforces strict typing and code quality checks:
-
-*   **Linting & Formatting (Ruff):**
-    ```bash
-    uv run ruff check .
-    ```
-*   **Static Type Checking (Mypy):**
-    ```bash
-    uv run mypy .
-    ```

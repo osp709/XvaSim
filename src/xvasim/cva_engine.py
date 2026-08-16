@@ -8,7 +8,7 @@ estimation for path-wise CVA aggregation.
 
 Public API
 ----------
-- :class:`CIRParams`  — calibrated CIR model parameters.
+- :class:`CIRParams` — calibrated CIR model parameters.
 - :func:`compute_marginal_pd` — marginal default probabilities from spreads.
 - :func:`compute_cva` — path-wise CVA aggregation.
 
@@ -20,41 +20,17 @@ Units & Conventions
 
 from __future__ import annotations
 
-import dataclasses
-
 import numpy as np
 from scipy.optimize import minimize
 
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
+from .models.base import CreditModel
+from .models.credit.cir import CIRParams
 
-
-@dataclasses.dataclass(frozen=True)
-class CIRParams:
-    """Calibrated parameters for the Cox-Ingersoll-Ross hazard-rate model.
-
-    The CIR process for the default intensity is:
-
-    .. math::
-        d\\lambda_t = \\kappa_{\\text{ann}}
-        (\\theta_{\\text{ann}} - \\lambda_t)\\,dt
-        + \\sigma_{\\text{ann}}\\sqrt{\\lambda_t}\\,dW_t
-
-    Attributes:
-        kappa_ann: Speed of mean reversion (annualised, e.g. 0.5).
-        theta_ann: Long-term mean hazard rate (annualised decimal,
-            e.g. 0.03 for 3 % per annum).
-        sigma_ann: Volatility of the hazard-rate process (annualised,
-            e.g. 0.10).
-        lambda_0_ann: Initial hazard rate at time 0 (annualised decimal,
-            e.g. 0.02).
-    """
-
-    kappa_ann: float
-    theta_ann: float
-    sigma_ann: float
-    lambda_0_ann: float
+__all__ = [
+    "CIRParams",
+    "compute_cva",
+    "compute_marginal_pd",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -182,13 +158,14 @@ def _calibrate_cir(
 def compute_marginal_pd(
     credit_spreads_ann: np.ndarray,
     tenors_yrs: np.ndarray,
+    model: CreditModel | None = None,
 ) -> np.ndarray:
-    r"""Compute marginal default probabilities using a CIR model.
+    r"""Compute marginal default probabilities using a CIR or modular credit model.
 
-    Calibrates a Cox-Ingersoll-Ross hazard-rate model to the provided
-    market credit spreads, computes cumulative default probabilities
-    from the calibrated survival curve, and returns the marginal default
-    probability for each interval :math:`[t_{i-1},\, t_i]`.
+    Calibrates a hazard-rate model to the provided market credit spreads,
+    computes cumulative default probabilities from the calibrated survival
+    curve, and returns the marginal default probability for each interval
+    :math:`[t_{i-1},\, t_i]`.
 
     .. math::
         \text{Marginal PD}_i = F(t_i) - F(t_{i-1})
@@ -199,10 +176,16 @@ def compute_marginal_pd(
             tenor (annualised decimals, e.g. 0.02 for 2.0 % p.a.).
         tenors_yrs: 1-D array of time points (years) at which to
             evaluate the default probabilities.
+        model: Optional pre-calibrated or custom
+            :class:`~xvasim.models.base.CreditModel`. If None (default),
+            calibrates a :class:`~xvasim.models.credit.CIRHazardRateModel`.
 
     Returns:
         1-D array of marginal default probabilities at each tenor.
     """
+    if model is not None:
+        return model.marginal_pd(tenors_yrs)
+
     params = _calibrate_cir(credit_spreads_ann, tenors_yrs)
     survival_probability = _cir_survival_probability(tenors_yrs, params)
     cumulative_pd = 1.0 - survival_probability

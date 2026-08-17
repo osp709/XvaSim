@@ -66,6 +66,12 @@ from .pricing_engine import (
     price_yoy_inflation_swap,
     price_zero_coupon_inflation_swap,
 )
+from .qmc import (
+    RandomSequenceType,
+    compare_t0_npv_fitting,
+    generate_brownian_increments,
+    generate_normal_draws,
+)
 from .utils import dates_to_years
 
 __all__ = [
@@ -93,6 +99,7 @@ __all__ = [
     "LGMParams",
     "ModelRegistry",
     "OptionType",
+    "RandomSequenceType",
     "RiskFactorType",
     "StochasticModel",
     "SwapLegType",
@@ -111,6 +118,7 @@ __all__ = [
     "benchmark_price_xccy_swap",
     "benchmark_price_zero_coupon_inflation_swap",
     "calibrate_lgm_to_swaptions",
+    "compare_t0_npv_fitting",
     "compute_cva",
     "compute_marginal_pd",
     "create_credit_model",
@@ -118,6 +126,8 @@ __all__ = [
     "create_inflation_model",
     "create_ir_model",
     "dates_to_years",
+    "generate_brownian_increments",
+    "generate_normal_draws",
     "list_available_models",
     "price_consumer_price_index_option",
     "price_cpi_option",

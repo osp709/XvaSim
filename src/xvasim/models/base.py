@@ -23,6 +23,8 @@ import typing
 
 import numpy as np
 
+from ..qmc import RandomSequenceType
+
 
 class RiskFactorType(enum.Enum):
     """Enumeration of financial risk factor categories.
@@ -180,18 +182,26 @@ class InterestRateModel(StochasticModel):
         self,
         times: np.ndarray,
         n_paths: int,
-        rng: np.random.Generator,
+        rng: np.random.Generator | None = None,
         dw: np.ndarray | None = None,
+        random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+        seed: int | None = None,
+        scramble: bool = True,
     ) -> np.ndarray:
         """Simulate state variable paths on a given time grid.
 
         Args:
             times: 1-D array of simulation times in years, shape ``(n_steps + 1,)``.
             n_paths: Number of Monte Carlo paths.
-            rng: Random number generator.
+            rng: Optional NumPy random number generator.
             dw: Optional pre-generated Brownian increments of shape
-                ``(n_paths, n_steps)``. If None, standard normal increments
-                are generated from *rng*.
+                ``(n_paths, n_steps)``. If None, increments are generated
+                using *random_type* / *rng*.
+            random_type: Random sequence generator type (:class:`RandomSequenceType`
+                or string, e.g. ``"pseudo"``, ``"sobol"``, ``"halton"``,
+                ``"latin_hypercube"``).
+            seed: Optional random seed.
+            scramble: If True (default), applies scrambling to QMC sequences.
 
         Returns:
             Array of simulated state paths, shape ``(n_paths, n_steps + 1)``.
@@ -253,7 +263,10 @@ class FXModel(StochasticModel):
         maturity_yrs: float,
         n_paths: int,
         n_steps: int,
-        rng: np.random.Generator,
+        rng: np.random.Generator | None = None,
+        random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+        seed: int | None = None,
+        scramble: bool = True,
     ) -> typing.Any:
         """Simulate joint state and FX spot paths under the domestic measure."""
         ...
@@ -306,7 +319,10 @@ class InflationModel(StochasticModel):
         maturity_yrs: float,
         n_paths: int,
         n_steps: int,
-        rng: np.random.Generator,
+        rng: np.random.Generator | None = None,
+        random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+        seed: int | None = None,
+        scramble: bool = True,
     ) -> typing.Any:
         """Simulate joint nominal rate, real rate, and CPI index paths.
 
@@ -314,7 +330,10 @@ class InflationModel(StochasticModel):
             maturity_yrs: Simulation horizon in years.
             n_paths: Number of Monte Carlo simulation paths.
             n_steps: Number of discrete time steps.
-            rng: NumPy random generator.
+            rng: Optional NumPy random generator.
+            random_type: Random sequence generator type.
+            seed: Optional random seed.
+            scramble: If True, applies scrambling to QMC sequences.
 
         Returns:
             Simulation results containing time grid, state paths, and CPI index paths.

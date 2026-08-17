@@ -13,10 +13,12 @@ Public API
 from __future__ import annotations
 
 import dataclasses
+import typing
 
 import numpy as np
 from scipy.stats import norm
 
+from ...qmc import RandomSequenceType, generate_brownian_increments
 from ..base import FXModel
 from ..registry import ModelRegistry
 
@@ -206,7 +208,7 @@ class GarmanKohlhagenFXModel(FXModel):
         self,
         strike: float,
         maturity_yrs: float,
-        option_type: str = "call",
+        option_type: typing.Any = "call",
         notional: float = 1.0,
     ) -> float:
         r"""Compute the closed-form Garman-Kohlhagen European option price.
@@ -220,7 +222,7 @@ class GarmanKohlhagenFXModel(FXModel):
         Args:
             strike: Option strike (domestic per foreign).
             maturity_yrs: Option maturity in years.
-            option_type: 'call' or 'put'.
+            option_type: 'call' or 'put' or OptionType enum.
             notional: Option notional in foreign currency units.
 
         Returns:
@@ -233,7 +235,11 @@ class GarmanKohlhagenFXModel(FXModel):
             msg = f"maturity_yrs must be strictly positive, got {maturity_yrs}"
             raise ValueError(msg)
 
-        is_call = option_type.strip().lower() == "call"
+        if isinstance(option_type, str):
+            is_call = option_type.strip().lower() == "call"
+        else:
+            opt_val = getattr(option_type, "value", str(option_type)).lower()
+            is_call = opt_val.endswith("call")
         df_d = float(self.domestic_discount_factor(maturity_yrs))
         fwd = self.forward_rate(maturity_yrs)
 
@@ -254,12 +260,18 @@ class GarmanKohlhagenFXModel(FXModel):
 
         return float(notional * price)
 
+    # Convenience alias for backwards compatibility & uniform interface
+    price_option_analytical = closed_form_option_price
+
     def simulate_paths(
         self,
         maturity_yrs: float,
         n_paths: int,
         n_steps: int,
-        rng: np.random.Generator,
+        rng: np.random.Generator | None = None,
+        random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+        seed: int | None = None,
+        scramble: bool = True,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Simulate joint state and FX spot paths under the domestic measure.
 
@@ -267,14 +279,18 @@ class GarmanKohlhagenFXModel(FXModel):
             maturity_yrs: Simulation horizon in years.
             n_paths: Number of Monte Carlo paths.
             n_steps: Number of time steps.
-            rng: NumPy random Generator.
+            rng: Optional NumPy random Generator.
+            random_type: Random sequence generator type (:class:`RandomSequenceType`
+                or str).
+            seed: Optional random seed.
+            scramble: If True, scrambles QMC sequences.
 
         Returns:
             ``(times, x_dom, x_for, fx_spot)`` — simulated time grid and paths.
         """
         dt = maturity_yrs / n_steps
-        sqrt_dt = np.sqrt(dt)
         times = np.linspace(0.0, maturity_yrs, n_steps + 1)
+        dt_vec = np.diff(times)
 
         x_dom = np.zeros((n_paths, n_steps + 1), dtype=np.float64)
         x_for = np.zeros((n_paths, n_steps + 1), dtype=np.float64)
@@ -282,6 +298,16 @@ class GarmanKohlhagenFXModel(FXModel):
         ln_fx[:, 0] = np.log(self._spot_fx)
 
         vol = self._fx_vol_ann
+
+        dw_matrix = generate_brownian_increments(
+            n_paths=n_paths,
+            dt_vec=dt_vec,
+            num_factors=1,
+            random_type=random_type,
+            seed=seed,
+            scramble=scramble,
+            rng=rng,
+        )
 
         for step in range(n_steps):
             t = times[step]
@@ -296,7 +322,7 @@ class GarmanKohlhagenFXModel(FXModel):
             r_f = -np.log(df_f_next / max(df_f_t, 1e-18)) / dt
 
             drift = (r_d - r_f) - 0.5 * vol**2
-            dw = rng.standard_normal(n_paths) * sqrt_dt
+            dw = dw_matrix[:, step]
             ln_fx[:, step + 1] = ln_fx[:, step] + drift * dt + vol * dw
 
         fx_spot = np.exp(ln_fx)

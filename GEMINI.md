@@ -26,6 +26,11 @@ This document provides system instructions, architectural context, mathematical 
    - Cross-Currency Swaps (`price_cross_currency_swap` / `price_xccy_swap`, `benchmark_price_cross_currency_swap` / `benchmark_price_xccy_swap`).
    - Foreign Exchange forwards & options (`price_foreign_exchange_forward` / `price_fx_forward`, `price_foreign_exchange_option` / `price_fx_option`, `benchmark_price_foreign_exchange_forward` / `benchmark_price_fx_forward`, `benchmark_price_foreign_exchange_option` / `benchmark_price_fx_option`).
    - Inflation derivatives (`price_zero_coupon_inflation_swap`, `price_year_on_year_inflation_swap` / `price_yoy_inflation_swap`, `price_consumer_price_index_option` / `price_cpi_option`, `benchmark_price_zero_coupon_inflation_swap`, `benchmark_price_consumer_price_index_option` / `benchmark_price_cpi_option`).
+4. **Quasi-Monte Carlo (QMC) & Variance Reduction** (`xvasim.qmc`):
+   - Low-discrepancy generators: `RandomSequenceType` (`SOBOL`, `HALTON`, `LATIN_HYPERCUBE`, `PSEUDO`).
+   - Variate generation: `generate_normal_draws` (scrambled inverse-CDF) and `generate_brownian_increments`.
+   - Convergence diagnostics: `compare_t0_npv_fitting` for T0 NPV accuracy and variance reduction factor (VRF) benchmarking.
+   - Uniform `random_type`, `seed`, and `scramble` parameters across all models and pricers.
 
 ---
 
@@ -49,6 +54,7 @@ XvaSim/
 │       ├── __init__.py         # Package root exports
 │       ├── cva_engine.py       # CVA calculation & credit model integration
 │       ├── pricing_engine.py   # MC & analytical pricing for FX & inflation derivatives
+│       ├── qmc.py              # Quasi-Monte Carlo sequences & variance reduction
 │       ├── utils.py            # Date conversion (dates_to_years)
 │       └── models/             # Modular stochastic models framework
 │           ├── __init__.py     # Models package exports

@@ -56,6 +56,21 @@ The following table summarizes all financial instruments and valuation adjustmen
 
 ---
 
+## ⚡ Quasi-Monte Carlo (QMC) & Variance Reduction
+
+`XvaSim` provides built-in low-discrepancy sequences to accelerate Monte Carlo convergence and minimize simulation noise:
+
+| Sequence Generator | `RandomSequenceType` Member / Alias | Description |
+| :--- | :--- | :--- |
+| **Sobol** | `RandomSequenceType.SOBOL` / `"sobol"` | Scrambled Sobol sequence with Owen scrambling for unbiased error estimation. |
+| **Halton** | `RandomSequenceType.HALTON` / `"halton"` | Generalized scrambled Halton sequence. |
+| **Latin Hypercube** | `RandomSequenceType.LATIN_HYPERCUBE` / `"lhs"` | Stratified Latin Hypercube Sampling (LHS). |
+| **Pseudo-Random** | `RandomSequenceType.PSEUDO` / `"pseudo"` | Standard NumPy PRNG (`default_rng`). |
+
+All pricing functions and model path simulators accept `random_type`, `seed`, and `scramble`. Use `compare_t0_npv_fitting` to benchmark convergence across generators.
+
+---
+
 ## 🧮 Mathematical Foundations & Stochastic Differential Equations (SDEs)
 
 ### 1. Interest Rate Models
@@ -172,6 +187,12 @@ $$S_0(T) = \left( \frac{P_r(0, T)}{P_n(0, T)} \right)^{1/T} - 1$$
 
 ```mermaid
 graph TD
+    subgraph QMCEngine ["Quasi-Monte Carlo & Variance Reduction (xvasim.qmc)"]
+        QMCSeq["RandomSequenceType (Sobol, Halton, LHS, PRNG)"]
+        QMCGen["Variate Generation (generate_normal_draws, generate_brownian_increments)"]
+        QMCBench["Benchmarking (compare_t0_npv_fitting)"]
+    end
+
     subgraph Modular Models ["Modular Stochastic Models (xvasim.models)"]
         Registry[ModelRegistry & Dynamic Factories <br> create_ir_model, create_fx_model, create_credit_model, create_inflation_model]
         IR[InterestRateModel ABC]
@@ -200,6 +221,8 @@ graph TD
         CVAEngine["CVA Engine <br> compute_cva, compute_marginal_pd"]
     end
 
+    QMCEngine --> Modular Models
+    QMCEngine --> MCPricers
     Modular Models --> MCPricers
     Modular Models --> Benchmarks
     Modular Models --> CVAEngine
@@ -403,6 +426,46 @@ cva = compute_cva(
 print(f"Calculated Portfolio CVA: ${cva:,.2f}")
 ```
 
+### 5. Quasi-Monte Carlo (QMC) Variance Reduction Benchmarking
+
+```python
+from xvasim import (
+    GarmanKohlhagenFXModel,
+    OptionType,
+    RandomSequenceType,
+    compare_t0_npv_fitting,
+    price_foreign_exchange_option,
+)
+
+gk_model = GarmanKohlhagenFXModel(
+    spot_fx=1.20, domestic_rate_ann=0.03, foreign_rate_ann=0.015, fx_vol_ann=0.12
+)
+
+# Benchmark pricing variance across PRNG, Sobol, and Halton
+comparison = compare_t0_npv_fitting(
+    pricer_fn=price_foreign_exchange_option,
+    pricer_kwargs={
+        "params": gk_model,
+        "strike": 1.20,
+        "maturity_yrs": 1.0,
+        "notional": 100_000.0,
+        "option_type": OptionType.CALL,
+        "n_steps": 1,
+    },
+    methods=(
+        RandomSequenceType.PSEUDO,
+        RandomSequenceType.SOBOL,
+        RandomSequenceType.HALTON,
+    ),
+    n_paths=4096,
+    seeds=(10, 20, 30, 40, 50),
+)
+
+for method, stats in comparison["methods"].items():
+    vrf = stats.get("variance_reduction_factor", 1.0)
+    print(f"{method:>8}: Variance={stats['variance']:.4f}, VRF={vrf:.1f}x, MAE={stats['mean_absolute_error']:.4f}")
+```
+
 ---
 
 ## 🧪 Testing & Verification Commands
@@ -417,3 +480,4 @@ uv run ruff check .
 # Strict static type checking (mypy on Python 3.14)
 uv run mypy .
 ```
+

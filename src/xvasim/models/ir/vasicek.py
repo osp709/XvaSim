@@ -18,6 +18,7 @@ import dataclasses
 
 import numpy as np
 
+from ...qmc import RandomSequenceType, generate_brownian_increments
 from ..base import InterestRateModel
 from ..registry import ModelRegistry
 
@@ -186,8 +187,11 @@ class VasicekModel(InterestRateModel):
         self,
         times: np.ndarray,
         n_paths: int,
-        rng: np.random.Generator,
+        rng: np.random.Generator | None = None,
         dw: np.ndarray | None = None,
+        random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+        seed: int | None = None,
+        scramble: bool = True,
     ) -> np.ndarray:
         """Simulate short rate r(t) paths under Vasicek."""
         n_steps = len(times) - 1
@@ -196,8 +200,15 @@ class VasicekModel(InterestRateModel):
         r_paths[:, 0] = self.r0_ann
 
         if dw is None:
-            std_normals = rng.standard_normal((n_paths, n_steps))
-            dw_matrix = std_normals * np.sqrt(dt_vec)
+            dw_matrix = generate_brownian_increments(
+                n_paths=n_paths,
+                dt_vec=dt_vec,
+                num_factors=1,
+                random_type=random_type,
+                seed=seed,
+                scramble=scramble,
+                rng=rng,
+            )
         else:
             dw_matrix = dw
 

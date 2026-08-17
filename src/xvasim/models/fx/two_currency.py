@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from ...qmc import RandomSequenceType, generate_normal_draws
 from ..base import FXModel, InterestRateModel
 from ..ir.lgm import LGMModel, LGMParams
 from ..registry import ModelRegistry
@@ -106,7 +107,10 @@ class TwoCurrencyFXModel(FXModel):
         maturity_yrs: float,
         n_paths: int,
         n_steps: int,
-        rng: np.random.Generator,
+        rng: np.random.Generator | None = None,
+        random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+        seed: int | None = None,
+        scramble: bool = True,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Simulate joint state and FX spot paths under the domestic measure.
 
@@ -114,7 +118,10 @@ class TwoCurrencyFXModel(FXModel):
             maturity_yrs: Simulation horizon in years.
             n_paths: Number of Monte Carlo paths.
             n_steps: Number of time steps.
-            rng: NumPy random Generator.
+            rng: Optional NumPy random Generator.
+            random_type: Random sequence type (:class:`RandomSequenceType` or str).
+            seed: Optional random seed.
+            scramble: If True, scrambles QMC sequences.
 
         Returns:
             ``(times, x_dom, x_for, fx_spot)`` — arrays of simulated paths.
@@ -133,10 +140,19 @@ class TwoCurrencyFXModel(FXModel):
         rho_f_fx = self._correlation_matrix[1, 2]
         vol_fx = self._fx_vol_ann
 
+        z_all = generate_normal_draws(
+            n_paths=n_paths,
+            dimension=3 * n_steps,
+            random_type=random_type,
+            seed=seed,
+            scramble=scramble,
+            rng=rng,
+        ).reshape(n_paths, n_steps, 3)
+
         for step in range(n_steps):
             t = times[step]
 
-            z_indep = rng.standard_normal((n_paths, 3))
+            z_indep = z_all[:, step, :]
             z_corr = z_indep @ chol.T
 
             dw_d = z_corr[:, 0] * sqrt_dt

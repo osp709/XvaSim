@@ -24,6 +24,7 @@ import typing
 
 import numpy as np
 
+from ...qmc import RandomSequenceType, generate_normal_draws
 from ..base import InflationModel, InterestRateModel
 from ..ir.hull_white import HullWhite1FModel
 from ..ir.lgm import LGMModel, LGMParams
@@ -311,7 +312,10 @@ class JarrowYildirimModel(InflationModel):
         maturity_yrs: float,
         n_paths: int,
         n_steps: int,
-        rng: np.random.Generator,
+        rng: np.random.Generator | None = None,
+        random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+        seed: int | None = None,
+        scramble: bool = True,
     ) -> InflationSimulationResult:
         """Simulate joint state, short rates, and CPI index paths.
 
@@ -319,7 +323,10 @@ class JarrowYildirimModel(InflationModel):
             maturity_yrs: Simulation horizon in years.
             n_paths: Number of Monte Carlo paths.
             n_steps: Number of time steps.
-            rng: NumPy random Generator.
+            rng: Optional NumPy random Generator.
+            random_type: Random sequence type (:class:`RandomSequenceType` or str).
+            seed: Optional random seed.
+            scramble: If True, scrambles QMC sequences.
 
         Returns:
             :class:`InflationSimulationResult` containing simulated paths.
@@ -344,10 +351,19 @@ class JarrowYildirimModel(InflationModel):
         r_nom[:, 0] = self._nominal_ir.short_rate(0.0, x_nom[:, 0])
         r_real[:, 0] = self._real_ir.short_rate(0.0, x_real[:, 0])
 
+        z_all = generate_normal_draws(
+            n_paths=n_paths,
+            dimension=3 * n_steps,
+            random_type=random_type,
+            seed=seed,
+            scramble=scramble,
+            rng=rng,
+        ).reshape(n_paths, n_steps, 3)
+
         for step in range(n_steps):
             t = times[step]
 
-            z_indep = rng.standard_normal((n_paths, 3))
+            z_indep = z_all[:, step, :]
             z_corr = z_indep @ chol.T
 
             dw_n = z_corr[:, 0] * sqrt_dt

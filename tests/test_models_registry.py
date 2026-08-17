@@ -1,5 +1,6 @@
 """Tests for the stochastic model registry and factory functions."""
 
+import typing
 import unittest
 
 import numpy as np
@@ -157,8 +158,11 @@ class TestModelRegistry(unittest.TestCase):
                 self,
                 times: np.ndarray,
                 n_paths: int,
-                rng: np.random.Generator,
+                rng: np.random.Generator | None = None,
                 dw: np.ndarray | None = None,
+                random_type: typing.Any = "pseudo",
+                seed: int | None = None,
+                scramble: bool = True,
             ) -> np.ndarray:
                 return np.zeros((n_paths, len(times)))
 

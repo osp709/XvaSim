@@ -17,6 +17,7 @@ import dataclasses
 import numpy as np
 from scipy.stats import norm
 
+from ...qmc import RandomSequenceType, generate_brownian_increments
 from ..base import InflationModel
 from ..registry import ModelRegistry
 from .jarrow_yildirim import InflationSimulationResult
@@ -227,7 +228,10 @@ class BlackInflationModel(InflationModel):
         maturity_yrs: float,
         n_paths: int,
         n_steps: int,
-        rng: np.random.Generator,
+        rng: np.random.Generator | None = None,
+        random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+        seed: int | None = None,
+        scramble: bool = True,
     ) -> InflationSimulationResult:
         """Simulate Black CPI paths matching forward curve and volatility.
 
@@ -235,14 +239,17 @@ class BlackInflationModel(InflationModel):
             maturity_yrs: Simulation horizon in years.
             n_paths: Number of Monte Carlo paths.
             n_steps: Number of time steps.
-            rng: NumPy random Generator.
+            rng: Optional NumPy random Generator.
+            random_type: Random sequence type (:class:`RandomSequenceType` or str).
+            seed: Optional random seed.
+            scramble: If True, scrambles QMC sequences.
 
         Returns:
             :class:`InflationSimulationResult` containing simulated paths.
         """
         dt = maturity_yrs / n_steps
-        sqrt_dt = np.sqrt(dt)
         times = np.linspace(0.0, maturity_yrs, n_steps + 1)
+        dt_vec = np.diff(times)
 
         fwd_cpis = np.array([self.forward_cpi(t) for t in times])
         vol = self._cpi_vol_ann
@@ -250,8 +257,16 @@ class BlackInflationModel(InflationModel):
         ln_cpi = np.zeros((n_paths, n_steps + 1), dtype=np.float64)
         ln_cpi[:, 0] = np.log(self._base_cpi)
 
-        # Generate standard Brownian motion increments
-        dw = rng.standard_normal((n_paths, n_steps)) * sqrt_dt
+        # Generate Brownian motion increments
+        dw = generate_brownian_increments(
+            n_paths=n_paths,
+            dt_vec=dt_vec,
+            num_factors=1,
+            random_type=random_type,
+            seed=seed,
+            scramble=scramble,
+            rng=rng,
+        )
 
         # Discrete forward step evolution
         for step in range(n_steps):

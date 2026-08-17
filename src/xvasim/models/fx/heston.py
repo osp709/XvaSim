@@ -16,6 +16,7 @@ import dataclasses
 import numpy as np
 from scipy.integrate import quad
 
+from ...qmc import RandomSequenceType, generate_normal_draws
 from ..base import FXModel
 from ..registry import ModelRegistry
 
@@ -400,7 +401,10 @@ class HestonFXModel(FXModel):
         maturity_yrs: float,
         n_paths: int,
         n_steps: int,
-        rng: np.random.Generator,
+        rng: np.random.Generator | None = None,
+        random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+        seed: int | None = None,
+        scramble: bool = True,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Simulate joint variance and spot FX paths under the domestic measure.
 
@@ -410,7 +414,11 @@ class HestonFXModel(FXModel):
             maturity_yrs: Simulation horizon in years.
             n_paths: Number of Monte Carlo paths.
             n_steps: Number of time steps.
-            rng: NumPy random Generator.
+            rng: Optional NumPy random Generator.
+            random_type: Random sequence generator type (:class:`RandomSequenceType`
+                or str).
+            seed: Optional random seed.
+            scramble: If True, scrambles QMC sequences.
 
         Returns:
             ``(times, v_paths, x_for, fx_spot)`` — simulated time grid, variance
@@ -433,6 +441,15 @@ class HestonFXModel(FXModel):
         rho = self._rho
         sqrt_one_minus_rho2 = np.sqrt(max(0.0, 1.0 - rho**2))
 
+        z_all = generate_normal_draws(
+            n_paths=n_paths,
+            dimension=2 * n_steps,
+            random_type=random_type,
+            seed=seed,
+            scramble=scramble,
+            rng=rng,
+        ).reshape(n_paths, n_steps, 2)
+
         for step in range(n_steps):
             t = times[step]
             t_next = times[step + 1]
@@ -445,8 +462,8 @@ class HestonFXModel(FXModel):
             r_d = -np.log(df_d_next / max(df_d_t, 1e-18)) / dt
             r_f = -np.log(df_f_next / max(df_f_t, 1e-18)) / dt
 
-            z1 = rng.standard_normal(n_paths)
-            z2 = rng.standard_normal(n_paths)
+            z1 = z_all[:, step, 0]
+            z2 = z_all[:, step, 1]
 
             dw_v = z1 * sqrt_dt
             dw_s = (rho * z1 + sqrt_one_minus_rho2 * z2) * sqrt_dt

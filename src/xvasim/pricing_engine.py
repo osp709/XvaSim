@@ -50,6 +50,7 @@ from .models.fx.two_currency import TwoCurrencyFXModel
 from .models.inflation.black_inflation import BlackInflationModel
 from .models.inflation.jarrow_yildirim import JarrowYildirimModel
 from .models.ir.lgm import LGMModel, LGMParams
+from .qmc import RandomSequenceType, generate_normal_draws
 
 __all__ = [
     "FXLGMParams",
@@ -398,7 +399,10 @@ def _simulate_fx_paths(
     maturity_yrs: float,
     n_paths: int,
     n_steps: int,
-    rng: np.random.Generator,
+    rng: np.random.Generator | None = None,
+    random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+    seed: int | None = None,
+    scramble: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Simulate FX and short-rate state paths under the domestic measure.
 
@@ -412,7 +416,10 @@ def _simulate_fx_paths(
         maturity_yrs: Simulation horizon (years).
         n_paths: Number of Monte Carlo paths.
         n_steps: Number of time steps.
-        rng: NumPy random Generator for reproducibility.
+        rng: Optional NumPy random Generator for reproducibility.
+        random_type: Sequence type (:class:`RandomSequenceType` or str).
+        seed: Optional random seed.
+        scramble: If True, scrambles QMC sequences.
 
     Returns:
         ``(times, x_dom, x_for, fx_spot)`` — all arrays of shape
@@ -433,6 +440,15 @@ def _simulate_fx_paths(
     kd = params.domestic.kappa_ann
     kf = params.foreign.kappa_ann
     vol_fx = params.fx_vol_ann
+
+    z_all = generate_normal_draws(
+        n_paths=n_paths,
+        dimension=3 * n_steps,
+        random_type=random_type,
+        seed=seed,
+        scramble=scramble,
+        rng=rng,
+    ).reshape(n_paths, n_steps, 3)
 
     for step in range(n_steps):
         t = times[step]
@@ -458,7 +474,7 @@ def _simulate_fx_paths(
             ]
         )
 
-        z_indep = rng.standard_normal((n_paths, 3))
+        z_indep = z_all[:, step, :]
         z_corr = z_indep @ chol.T
 
         dw_d = z_corr[:, 0] * sqrt_dt
@@ -669,6 +685,8 @@ def price_foreign_exchange_forward(
     n_paths: int = 100_000,
     n_steps: int = 100,
     seed: int | None = 42,
+    random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+    scramble: bool = True,
 ) -> dict[str, float | np.ndarray]:
     """Price a currency forward via Monte Carlo under LGM or modular FX models.
 
@@ -684,6 +702,8 @@ def price_foreign_exchange_forward(
         n_paths: Number of Monte Carlo paths.
         n_steps: Number of simulation time steps.
         seed: Random seed (``None`` for non-deterministic).
+        random_type: Sequence type (:class:`RandomSequenceType` or str).
+        scramble: If True, applies scrambling to QMC sequences.
 
     Returns:
         Dictionary with keys:
@@ -693,24 +713,40 @@ def price_foreign_exchange_forward(
         - ``"analytical_benchmark_price"`` — exact analytical benchmark price.
         - ``"fx_terminal"`` — 1-D array of terminal FX rates.
     """
-    rng = np.random.default_rng(seed)
-
     if isinstance(params, FXLGMParams):
         times, x_dom, _x_for, fx_paths = _simulate_fx_paths(
-            params, maturity_yrs, n_paths, n_steps, rng
+            params,
+            maturity_yrs,
+            n_paths,
+            n_steps,
+            random_type=random_type,
+            seed=seed,
+            scramble=scramble,
         )
         s_t = fx_paths[:, -1]
         dom_df = _discount_path(params.domestic, x_dom, times)
         df_t = dom_df[:, -1]
     elif isinstance(params, TwoCurrencyFXModel):
         times, x_dom, _x_for, fx_paths = params.simulate_paths(
-            maturity_yrs, n_paths, n_steps, rng
+            maturity_yrs,
+            n_paths,
+            n_steps,
+            random_type=random_type,
+            seed=seed,
+            scramble=scramble,
         )
         s_t = fx_paths[:, -1]
         dom_df = params.domestic_ir_model.discount_path(times, x_dom)
         df_t = dom_df[:, -1]
     elif isinstance(params, FXModel):
-        sim_res = params.simulate_paths(maturity_yrs, n_paths, n_steps, rng)
+        sim_res = params.simulate_paths(
+            maturity_yrs,
+            n_paths,
+            n_steps,
+            random_type=random_type,
+            seed=seed,
+            scramble=scramble,
+        )
         fx_paths = sim_res[-1]
         s_t = fx_paths[:, -1]
         if hasattr(params, "domestic_discount_factor"):
@@ -799,6 +835,20 @@ def benchmark_price_foreign_exchange_option(
             return {k: float(v) for k, v in res.items()}
         return {"price": float(res)}
 
+    if hasattr(params, "closed_form_option_price"):
+        opt_str = (
+            resolved.value
+            if isinstance(resolved, OptionType)
+            else str(resolved).lower()
+        )
+        res_val = params.closed_form_option_price(
+            strike=strike,
+            maturity_yrs=maturity_yrs,
+            option_type=opt_str,
+            notional=notional,
+        )
+        return {"price": float(res_val)}
+
     if isinstance(params, (FXLGMParams, TwoCurrencyFXModel)):
         if isinstance(params, FXLGMParams):
             df_d = float(
@@ -883,6 +933,8 @@ def price_foreign_exchange_option(
     n_paths: int = 100_000,
     n_steps: int = 100,
     seed: int | None = 42,
+    random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+    scramble: bool = True,
 ) -> dict[str, float | np.ndarray]:
     r"""Price a European currency option via Monte Carlo under LGM or modular FX models.
 
@@ -903,6 +955,8 @@ def price_foreign_exchange_option(
         n_paths: Number of Monte Carlo paths.
         n_steps: Number of simulation time steps.
         seed: Random seed.
+        random_type: Random sequence type (:class:`RandomSequenceType` or str).
+        scramble: If True, applies scrambling to QMC sequences.
 
     Returns:
         Dictionary with keys:
@@ -934,24 +988,40 @@ def price_foreign_exchange_option(
         )
         raise TypeError(msg)
 
-    rng = np.random.default_rng(seed)
-
     if isinstance(params, FXLGMParams):
         times, x_dom, _x_for, fx_paths = _simulate_fx_paths(
-            params, maturity_yrs, n_paths, n_steps, rng
+            params,
+            maturity_yrs,
+            n_paths,
+            n_steps,
+            random_type=random_type,
+            seed=seed,
+            scramble=scramble,
         )
         s_t = fx_paths[:, -1]
         dom_df = _discount_path(params.domestic, x_dom, times)
         df_t = dom_df[:, -1]
     elif isinstance(params, TwoCurrencyFXModel):
         times, x_dom, _x_for, fx_paths = params.simulate_paths(
-            maturity_yrs, n_paths, n_steps, rng
+            maturity_yrs,
+            n_paths,
+            n_steps,
+            random_type=random_type,
+            seed=seed,
+            scramble=scramble,
         )
         s_t = fx_paths[:, -1]
         dom_df = params.domestic_ir_model.discount_path(times, x_dom)
         df_t = dom_df[:, -1]
     elif isinstance(params, FXModel):
-        sim_res = params.simulate_paths(maturity_yrs, n_paths, n_steps, rng)
+        sim_res = params.simulate_paths(
+            maturity_yrs,
+            n_paths,
+            n_steps,
+            random_type=random_type,
+            seed=seed,
+            scramble=scramble,
+        )
         fx_paths = sim_res[-1]
         s_t = fx_paths[:, -1]
         if hasattr(params, "domestic_discount_factor"):
@@ -1064,6 +1134,8 @@ def price_zero_coupon_inflation_swap(
     n_paths: int | None = 10_000,
     n_steps: int = 50,
     seed: int | None = None,
+    random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+    scramble: bool = True,
 ) -> dict[str, float]:
     """Price a Zero-Coupon Inflation Swap (ZCIS) via Monte Carlo simulation.
 
@@ -1082,6 +1154,9 @@ def price_zero_coupon_inflation_swap(
             analytical closed form benchmark.
         n_steps: Number of simulation steps (if Monte Carlo).
         seed: Optional random seed.
+        random_type: Random sequence generator type (:class:`RandomSequenceType`
+            or str).
+        scramble: If True, applies scrambling to QMC sequences.
 
     Returns:
         Dictionary with ``price``, ``fair_swap_rate``, ``forward_cpi``,
@@ -1103,8 +1178,14 @@ def price_zero_coupon_inflation_swap(
         return ana_res
 
     # Monte Carlo pricing
-    rng = np.random.default_rng(seed)
-    sim_res = model.simulate_paths(maturity_yrs, n_paths, n_steps, rng)
+    sim_res = model.simulate_paths(
+        maturity_yrs=maturity_yrs,
+        n_paths=n_paths,
+        n_steps=n_steps,
+        random_type=random_type,
+        seed=seed,
+        scramble=scramble,
+    )
 
     cpi_t = sim_res.cpi_index[:, -1]
     df_t = sim_res.nominal_discount_factors[:, -1]
@@ -1137,6 +1218,8 @@ def price_year_on_year_inflation_swap(
     n_paths: int = 10_000,
     n_steps_per_year: int = 12,
     seed: int | None = None,
+    random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+    scramble: bool = True,
 ) -> dict[str, typing.Any]:
     """Price a Year-on-Year (YoY) Inflation Swap via Monte Carlo simulation.
 
@@ -1153,6 +1236,9 @@ def price_year_on_year_inflation_swap(
         n_paths: Number of Monte Carlo paths.
         n_steps_per_year: Number of simulation steps per year.
         seed: Optional random seed.
+        random_type: Random sequence generator type (:class:`RandomSequenceType`
+            or str).
+        scramble: If True, applies scrambling to QMC sequences.
 
     Returns:
         Dictionary with ``price``, ``std_error``, and ``period_cash_flows``.
@@ -1168,8 +1254,14 @@ def price_year_on_year_inflation_swap(
     maturity_yrs = float(pay_times[-1])
     n_steps = max(int(np.ceil(maturity_yrs * n_steps_per_year)), len(pay_times))
 
-    rng = np.random.default_rng(seed)
-    sim_res = model.simulate_paths(maturity_yrs, n_paths, n_steps, rng)
+    sim_res = model.simulate_paths(
+        maturity_yrs=maturity_yrs,
+        n_paths=n_paths,
+        n_steps=n_steps,
+        random_type=random_type,
+        seed=seed,
+        scramble=scramble,
+    )
 
     times = sim_res.times
     cpi_paths = sim_res.cpi_index
@@ -1336,6 +1428,8 @@ def price_consumer_price_index_option(
     n_paths: int | None = 10_000,
     n_steps: int = 50,
     seed: int | None = None,
+    random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+    scramble: bool = True,
 ) -> dict[str, float]:
     """Price a European Zero-Coupon CPI option via Monte Carlo.
 
@@ -1353,6 +1447,9 @@ def price_consumer_price_index_option(
             analytical closed-form benchmark.
         n_steps: Number of simulation steps (for Monte Carlo).
         seed: Optional random seed.
+        random_type: Random sequence generator type (:class:`RandomSequenceType`
+            or str).
+        scramble: If True, applies scrambling to QMC sequences.
 
     Returns:
         Dictionary containing ``price``, ``std_error`` (for MC),
@@ -1381,8 +1478,14 @@ def price_consumer_price_index_option(
     is_call = resolved is OptionType.CALL
     k_comp = (1.0 + strike_rate_ann) ** maturity_yrs
 
-    rng = np.random.default_rng(seed)
-    sim_res = model.simulate_paths(maturity_yrs, n_paths, n_steps, rng)
+    sim_res = model.simulate_paths(
+        maturity_yrs=maturity_yrs,
+        n_paths=n_paths,
+        n_steps=n_steps,
+        random_type=random_type,
+        seed=seed,
+        scramble=scramble,
+    )
 
     cpi_t = sim_res.cpi_index[:, -1]
     df_t = sim_res.nominal_discount_factors[:, -1]
@@ -1534,6 +1637,8 @@ def price_interest_rate_swap(
     n_paths: int | None = 10_000,
     n_steps_per_year: int = 20,
     seed: int | None = None,
+    random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+    scramble: bool = True,
 ) -> dict[str, typing.Any]:
     r"""Price a single-currency vanilla Interest Rate Swap (IRS).
 
@@ -1561,6 +1666,9 @@ def price_interest_rate_swap(
             the discount curve.
         n_steps_per_year: Number of simulation steps per year (for Monte Carlo).
         seed: Random seed for Monte Carlo simulation.
+        random_type: Random sequence generator type (:class:`RandomSequenceType`
+            or str).
+        scramble: If True, applies scrambling to QMC sequences.
 
     Returns:
         Dictionary containing:
@@ -1651,8 +1759,6 @@ def price_interest_rate_swap(
         }
 
     # Monte Carlo simulation
-    rng = np.random.default_rng(seed)
-
     grid_points: list[float] = [0.0]
     for i in range(n_periods):
         t_s = float(t_starts[i])
@@ -1668,7 +1774,13 @@ def price_interest_rate_swap(
     idx_starts = [int(np.argmin(np.abs(sim_times - t))) for t in t_starts]
     idx_ends = [int(np.argmin(np.abs(sim_times - t))) for t in t_ends]
 
-    x_paths = ir_model.simulate_paths(sim_times, n_paths, rng)
+    x_paths = ir_model.simulate_paths(
+        sim_times,
+        n_paths,
+        random_type=random_type,
+        seed=seed,
+        scramble=scramble,
+    )
     df_paths = ir_model.discount_path(sim_times, x_paths)
 
     total_pv_paths = np.zeros(n_paths, dtype=np.float64)
@@ -1809,6 +1921,8 @@ def price_cross_currency_swap(
     n_paths: int | None = 10_000,
     n_steps: int = 100,
     seed: int | None = None,
+    random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
+    scramble: bool = True,
 ) -> dict[str, typing.Any]:
     r"""Price a Cross-Currency Swap (XCCY) supporting multi-currency rate dynamics.
 
@@ -1844,6 +1958,9 @@ def price_cross_currency_swap(
             If None, computes the exact analytical closed-form price.
         n_steps: Number of simulation steps (for Monte Carlo).
         seed: Random seed for Monte Carlo simulation.
+        random_type: Random sequence generator type (:class:`RandomSequenceType`
+            or str).
+        scramble: If True, applies scrambling to QMC sequences.
 
     Returns:
         Dictionary containing:
@@ -2013,7 +2130,6 @@ def price_cross_currency_swap(
         return base_result
 
     # Monte Carlo simulation
-    rng = np.random.default_rng(seed)
     maturity_yrs = float(t_ends[-1])
     n_steps_actual = max(n_steps, n_periods * 5)
 
@@ -2021,7 +2137,9 @@ def price_cross_currency_swap(
         maturity_yrs=maturity_yrs,
         n_paths=n_paths,
         n_steps=n_steps_actual,
-        rng=rng,
+        random_type=random_type,
+        seed=seed,
+        scramble=scramble,
     )
 
     df_d_paths = dom_ir.discount_path(sim_times, x_dom)

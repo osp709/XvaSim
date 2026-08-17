@@ -1,0 +1,1 @@
+"""Credit model unit tests."""

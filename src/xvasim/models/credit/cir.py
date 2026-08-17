@@ -16,20 +16,24 @@ import dataclasses
 import numpy as np
 from scipy.optimize import minimize
 
+from ...jit import (
+    cir_calibration_objective_kernel,
+    cir_survival_probability_kernel,
+)
 from ..base import CreditModel
 from ..registry import ModelRegistry
 
 
 @dataclasses.dataclass(frozen=True)
 class CIRParams:
-    """Calibrated parameters for the Cox-Ingersoll-Ross hazard-rate model.
+    r"""Calibrated parameters for the Cox-Ingersoll-Ross hazard-rate model.
 
     The CIR process for the default intensity is:
 
     .. math::
-        d\\lambda_t = \\kappa_{\\text{ann}}
-        (\\theta_{\\text{ann}} - \\lambda_t)\\,dt
-        + \\sigma_{\\text{ann}}\\sqrt{\\lambda_t}\\,dW_t
+        d\lambda_t = \kappa_{\text{ann}}
+        (\theta_{\text{ann}} - \lambda_t)\,dt
+        + \sigma_{\text{ann}}\sqrt{\lambda_t}\,dW_t
 
     Attributes:
         kappa_ann: Speed of mean reversion (annualised, e.g. 0.5).
@@ -108,21 +112,13 @@ class CIRHazardRateModel(CreditModel):
             P_{\text{surv}}(0, t) = A(t)\,e^{-B(t)\,\lambda_{0,\text{ann}}}
         """
         tenors_arr = np.asarray(tenors_yrs, dtype=np.float64)
-        kappa = self.kappa_ann
-        theta = self.theta_ann
-        sigma = self.sigma_ann
-        lam0 = self.lambda_0_ann
-
-        gamma = np.sqrt(kappa**2 + 2.0 * sigma**2)
-        exp_gamma_t = np.exp(gamma * tenors_arr)
-        denominator = (kappa + gamma) * (exp_gamma_t - 1.0) + 2.0 * gamma
-
-        power = (2.0 * kappa * theta) / (sigma**2)
-        numerator_a = 2.0 * gamma * np.exp((kappa + gamma) * tenors_arr / 2.0)
-        a_t = (numerator_a / denominator) ** power
-        b_t = 2.0 * (exp_gamma_t - 1.0) / denominator
-
-        return a_t * np.exp(-b_t * lam0)  # type: ignore[no-any-return]
+        return cir_survival_probability_kernel(
+            tenors_arr,
+            self.kappa_ann,
+            self.theta_ann,
+            self.sigma_ann,
+            self.lambda_0_ann,
+        )
 
     @classmethod
     def calibrate_from_spreads(
@@ -134,14 +130,20 @@ class CIRHazardRateModel(CreditModel):
         spreads = np.asarray(credit_spreads_ann, dtype=np.float64)
         tenors = np.asarray(tenors_yrs, dtype=np.float64)
 
-        def objective(params_vec: np.ndarray) -> float:
-            cir = CIRParams(*params_vec)
-            model_instance = cls(params=cir)
-            surv_prob = model_instance.survival_probability(tenors)
-            model_spreads = -np.log(np.maximum(surv_prob, 1e-15)) / np.maximum(
-                tenors, 1e-10
+        if (
+            len(spreads) == 0
+            or len(tenors) == 0
+            or np.isnan(spreads).any()
+            or np.isnan(tenors).any()
+        ):
+            msg = (
+                "CIR calibration failed: input spreads or tenors contain NaN "
+                "or are empty"
             )
-            return float(np.sum((model_spreads - spreads) ** 2))
+            raise RuntimeError(msg)
+
+        def objective(params_vec: np.ndarray) -> float:
+            return cir_calibration_objective_kernel(params_vec, tenors, spreads)
 
         x0 = [
             0.1,
@@ -157,7 +159,7 @@ class CIRHazardRateModel(CreditModel):
         ]
 
         result = minimize(objective, x0, bounds=bounds, method="L-BFGS-B")
-        if not result.success:
+        if not result.success or np.isnan(result.x).any():
             msg = f"CIR calibration failed: {result.message}"
             raise RuntimeError(msg)
 

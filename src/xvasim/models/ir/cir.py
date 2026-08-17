@@ -1,10 +1,10 @@
-"""Cox-Ingersoll-Ross (CIR) interest-rate model implementation.
+r"""Cox-Ingersoll-Ross (CIR) interest-rate model implementation.
 
 This module implements the classic CIR (1985) square-root short-rate model:
 
 .. math::
-    dr(t) = \\kappa_{\\text{ann}}(\\theta_{\\text{ann}} - r(t))\\,dt
-    + \\sigma_{\\text{ann}}\\sqrt{r(t)}\\,dW(t)
+    dr(t) = \kappa_{\text{ann}}(\theta_{\text{ann}} - r(t))\,dt
+    + \sigma_{\text{ann}}\sqrt{r(t)}\,dW(t)
 
 Public API
 ----------
@@ -18,6 +18,7 @@ import dataclasses
 
 import numpy as np
 
+from ...jit import cir_simulate_paths_kernel, discount_path_kernel
 from ...qmc import RandomSequenceType, generate_brownian_increments
 from ..base import InterestRateModel
 from ..registry import ModelRegistry
@@ -170,15 +171,9 @@ class CIRInterestRateModel(InterestRateModel):
         state_paths: np.ndarray,
     ) -> np.ndarray:
         """Compute path-wise discount factors D(0, t_i) along paths."""
-        n_paths, n_times = state_paths.shape
-        dt_vec = np.diff(times)
-        cum_integral = np.zeros((n_paths, n_times))
-        clamped_paths = np.maximum(state_paths, 0.0)
-        for j in range(1, n_times):
-            cum_integral[:, j] = cum_integral[:, j - 1] + 0.5 * dt_vec[j - 1] * (
-                clamped_paths[:, j - 1] + clamped_paths[:, j]
-            )
-        return np.exp(-cum_integral)
+        times_arr = np.asarray(times, dtype=np.float64)
+        clamped_paths = np.maximum(np.asarray(state_paths, dtype=np.float64), 0.0)
+        return discount_path_kernel(times_arr, clamped_paths)
 
     def simulate_paths(
         self,
@@ -191,10 +186,9 @@ class CIRInterestRateModel(InterestRateModel):
         scramble: bool = True,
     ) -> np.ndarray:
         """Simulate short rate r(t) paths under CIR using full truncation."""
-        n_steps = len(times) - 1
-        dt_vec = np.diff(times)
-        r_paths = np.zeros((n_paths, n_steps + 1), dtype=np.float64)
-        r_paths[:, 0] = self.r0_ann
+        times_arr = np.asarray(times, dtype=np.float64)
+        n_steps = len(times_arr) - 1
+        dt_vec = np.diff(times_arr)
 
         if dw is None:
             dw_matrix = generate_brownian_increments(
@@ -207,13 +201,15 @@ class CIRInterestRateModel(InterestRateModel):
                 rng=rng,
             )
         else:
-            dw_matrix = dw
+            dw_matrix = np.asarray(dw, dtype=np.float64)
 
-        for step in range(n_steps):
-            dt = dt_vec[step]
-            r_pos = np.maximum(r_paths[:, step], 0.0)
-            drift = self.kappa_ann * (self.theta_ann - r_pos) * dt
-            diffusion = self.sigma_ann * np.sqrt(r_pos) * dw_matrix[:, step]
-            r_paths[:, step + 1] = np.maximum(r_paths[:, step] + drift + diffusion, 0.0)
-
-        return r_paths
+        return cir_simulate_paths_kernel(
+            n_paths=n_paths,
+            n_steps=n_steps,
+            dt_vec=dt_vec,
+            kappa=self.kappa_ann,
+            theta=self.theta_ann,
+            sigma=self.sigma_ann,
+            r0=self.r0_ann,
+            dw_matrix=dw_matrix,
+        )

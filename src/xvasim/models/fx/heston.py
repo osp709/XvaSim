@@ -16,6 +16,7 @@ import dataclasses
 import numpy as np
 from scipy.integrate import quad
 
+from ...jit import heston_simulate_paths_kernel
 from ...qmc import RandomSequenceType, generate_normal_draws
 from ..base import FXModel
 from ..registry import ModelRegistry
@@ -311,8 +312,7 @@ class HestonFXModel(FXModel):
 
         i = 1j
         d = np.sqrt(
-            (rho * sigma_v * u * i - b_j) ** 2
-            - sigma_v**2 * (2 * u_j * u * i - u**2)
+            (rho * sigma_v * u * i - b_j) ** 2 - sigma_v**2 * (2 * u_j * u * i - u**2)
         )
         g = (b_j - rho * sigma_v * u * i - d) / (b_j - rho * sigma_v * u * i + d)
 
@@ -427,19 +427,7 @@ class HestonFXModel(FXModel):
         dt = maturity_yrs / n_steps
         sqrt_dt = np.sqrt(dt)
         times = np.linspace(0.0, maturity_yrs, n_steps + 1)
-
-        v_paths = np.zeros((n_paths, n_steps + 1), dtype=np.float64)
-        ln_fx = np.zeros((n_paths, n_steps + 1), dtype=np.float64)
         x_dummy = np.zeros((n_paths, n_steps + 1), dtype=np.float64)
-
-        v_paths[:, 0] = self._v_0
-        ln_fx[:, 0] = np.log(self._spot_fx)
-
-        kappa = self._kappa_ann
-        theta = self._theta_ann
-        sigma_v = self._sigma_v_ann
-        rho = self._rho
-        sqrt_one_minus_rho2 = np.sqrt(max(0.0, 1.0 - rho**2))
 
         z_all = generate_normal_draws(
             n_paths=n_paths,
@@ -450,36 +438,33 @@ class HestonFXModel(FXModel):
             rng=rng,
         ).reshape(n_paths, n_steps, 2)
 
+        # Precompute forward rates for each step
+        r_d_vec = np.empty(n_steps, dtype=np.float64)
+        r_f_vec = np.empty(n_steps, dtype=np.float64)
         for step in range(n_steps):
             t = times[step]
             t_next = times[step + 1]
-
             df_d_t = float(self.domestic_discount_factor(t))
             df_d_next = float(self.domestic_discount_factor(t_next))
             df_f_t = float(self.foreign_discount_factor(t))
             df_f_next = float(self.foreign_discount_factor(t_next))
+            r_d_vec[step] = -np.log(df_d_next / max(df_d_t, 1e-18)) / dt
+            r_f_vec[step] = -np.log(df_f_next / max(df_f_t, 1e-18)) / dt
 
-            r_d = -np.log(df_d_next / max(df_d_t, 1e-18)) / dt
-            r_f = -np.log(df_f_next / max(df_f_t, 1e-18)) / dt
+        v_paths, fx_spot = heston_simulate_paths_kernel(
+            n_paths=n_paths,
+            n_steps=n_steps,
+            dt=dt,
+            sqrt_dt=sqrt_dt,
+            v0=self._v_0,
+            spot_fx=self._spot_fx,
+            kappa=self._kappa_ann,
+            theta=self._theta_ann,
+            sigma_v=self._sigma_v_ann,
+            rho=self._rho,
+            r_d_vec=r_d_vec,
+            r_f_vec=r_f_vec,
+            z_all=z_all,
+        )
 
-            z1 = z_all[:, step, 0]
-            z2 = z_all[:, step, 1]
-
-            dw_v = z1 * sqrt_dt
-            dw_s = (rho * z1 + sqrt_one_minus_rho2 * z2) * sqrt_dt
-
-            # Full Truncation scheme: v_plus = max(v, 0)
-            v_curr = v_paths[:, step]
-            v_pos = np.maximum(v_curr, 0.0)
-            sqrt_v_pos = np.sqrt(v_pos)
-
-            # Variance evolution
-            v_next = v_curr + kappa * (theta - v_pos) * dt + sigma_v * sqrt_v_pos * dw_v
-            v_paths[:, step + 1] = v_next
-
-            # Spot evolution
-            drift_s = (r_d - r_f) - 0.5 * v_pos
-            ln_fx[:, step + 1] = ln_fx[:, step] + drift_s * dt + sqrt_v_pos * dw_s
-
-        fx_spot = np.exp(ln_fx)
         return times, v_paths, x_dummy, fx_spot

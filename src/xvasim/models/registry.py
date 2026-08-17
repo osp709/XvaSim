@@ -44,8 +44,7 @@ class ModelRegistry:
         risk_factor_type: RiskFactorType | str,
         model_name: str,
         model_cls: None = None,
-    ) -> typing.Callable[[type[TModel]], type[TModel]]:
-        ...
+    ) -> typing.Callable[[type[TModel]], type[TModel]]: ...
 
     @typing.overload
     @classmethod
@@ -54,8 +53,7 @@ class ModelRegistry:
         risk_factor_type: RiskFactorType | str,
         model_name: str,
         model_cls: type[TModel],
-    ) -> type[TModel]:
-        ...
+    ) -> type[TModel]: ...
 
     @classmethod
     def register(
@@ -266,4 +264,3 @@ def list_available_models(
         List of registered model name strings.
     """
     return ModelRegistry.list_models(risk_factor_type)
-

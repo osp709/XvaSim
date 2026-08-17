@@ -339,4 +339,3 @@ class InflationModel(StochasticModel):
             Simulation results containing time grid, state paths, and CPI index paths.
         """
         ...
-

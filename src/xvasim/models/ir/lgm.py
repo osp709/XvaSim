@@ -18,6 +18,7 @@ import dataclasses
 import numpy as np
 from scipy.optimize import brentq
 
+from ...jit import discount_path_kernel, lgm_simulate_paths_kernel
 from ...qmc import RandomSequenceType, generate_brownian_increments
 from ..base import InterestRateModel
 from ..registry import ModelRegistry
@@ -218,20 +219,15 @@ class LGMModel(InterestRateModel):
         state_paths: np.ndarray,
     ) -> np.ndarray:
         """Compute path-wise discount factors D(0, t_i) using the bank account."""
-        n_paths, n_times = state_paths.shape
-        short_rates = np.zeros_like(state_paths)
+        times_arr = np.asarray(times, dtype=np.float64)
+        paths_arr = np.asarray(state_paths, dtype=np.float64)
+        n_paths, n_times = paths_arr.shape
+        short_rates = np.empty((n_paths, n_times), dtype=np.float64)
         for j in range(n_times):
-            t = times[j]
-            short_rates[:, j] = self.short_rate(t, state_paths[:, j])
+            t = times_arr[j]
+            short_rates[:, j] = self.short_rate(t, paths_arr[:, j])
 
-        dt_vec = np.diff(times)
-        cum_integral = np.zeros((n_paths, n_times))
-        for j in range(1, n_times):
-            cum_integral[:, j] = cum_integral[:, j - 1] + 0.5 * dt_vec[j - 1] * (
-                short_rates[:, j - 1] + short_rates[:, j]
-            )
-
-        return np.exp(-cum_integral)
+        return discount_path_kernel(times_arr, short_rates)
 
     def simulate_paths(
         self,
@@ -244,9 +240,9 @@ class LGMModel(InterestRateModel):
         scramble: bool = True,
     ) -> np.ndarray:
         """Simulate state variable x(t) paths: dx = -kappa * x * dt + sigma(t) * dW."""
-        n_steps = len(times) - 1
-        dt_vec = np.diff(times)
-        x_paths = np.zeros((n_paths, n_steps + 1), dtype=np.float64)
+        times_arr = np.asarray(times, dtype=np.float64)
+        n_steps = len(times_arr) - 1
+        dt_vec = np.diff(times_arr)
 
         if dw is None:
             dw_matrix = generate_brownian_increments(
@@ -259,19 +255,20 @@ class LGMModel(InterestRateModel):
                 rng=rng,
             )
         else:
-            dw_matrix = dw
+            dw_matrix = np.asarray(dw, dtype=np.float64)
 
-        for step in range(n_steps):
-            t = times[step]
-            dt = dt_vec[step]
-            sig = self.sigma_at(t)
-            x_paths[:, step + 1] = (
-                x_paths[:, step]
-                - self.kappa_ann * x_paths[:, step] * dt
-                + sig * dw_matrix[:, step]
-            )
-
-        return x_paths
+        sigmas = np.array(
+            [self.sigma_at(times_arr[s]) for s in range(n_steps)],
+            dtype=np.float64,
+        )
+        return lgm_simulate_paths_kernel(
+            n_paths=n_paths,
+            n_steps=n_steps,
+            dt_vec=dt_vec,
+            kappa=self.kappa_ann,
+            sigmas=sigmas,
+            dw_matrix=dw_matrix,
+        )
 
     @classmethod
     def calibrate_to_swaptions(

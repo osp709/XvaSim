@@ -1,10 +1,10 @@
-"""Vasicek short-rate interest rate model implementation.
+r"""Vasicek short-rate interest rate model implementation.
 
 This module implements the classic Vasicek (1977) short-rate model:
 
 .. math::
-    dr(t) = \\kappa_{\\text{ann}}(\\theta_{\\text{ann}} - r(t))\\,dt
-    + \\sigma_{\\text{ann}}\\,dW(t)
+    dr(t) = \kappa_{\text{ann}}(\theta_{\text{ann}} - r(t))\,dt
+    + \sigma_{\text{ann}}\,dW(t)
 
 Public API
 ----------
@@ -18,6 +18,7 @@ import dataclasses
 
 import numpy as np
 
+from ...jit import discount_path_kernel, vasicek_simulate_paths_kernel
 from ...qmc import RandomSequenceType, generate_brownian_increments
 from ..base import InterestRateModel
 from ..registry import ModelRegistry
@@ -143,9 +144,7 @@ class VasicekModel(InterestRateModel):
 
         if abs(kappa) < 1e-12:
             b_tau = tau
-            a_tau = np.exp(
-                -theta * tau + (sigma**2 / 6.0) * (tau**3)
-            )
+            a_tau = np.exp(-theta * tau + (sigma**2 / 6.0) * (tau**3))
         else:
             b_tau = (1.0 - np.exp(-kappa * tau)) / kappa
             exponent = (theta - (sigma**2) / (2.0 * kappa**2)) * (b_tau - tau) - (
@@ -174,14 +173,9 @@ class VasicekModel(InterestRateModel):
         state_paths: np.ndarray,
     ) -> np.ndarray:
         """Compute path-wise discount factors D(0, t_i) along paths."""
-        n_paths, n_times = state_paths.shape
-        dt_vec = np.diff(times)
-        cum_integral = np.zeros((n_paths, n_times))
-        for j in range(1, n_times):
-            cum_integral[:, j] = cum_integral[:, j - 1] + 0.5 * dt_vec[j - 1] * (
-                state_paths[:, j - 1] + state_paths[:, j]
-            )
-        return np.exp(-cum_integral)
+        times_arr = np.asarray(times, dtype=np.float64)
+        paths_arr = np.asarray(state_paths, dtype=np.float64)
+        return discount_path_kernel(times_arr, paths_arr)
 
     def simulate_paths(
         self,
@@ -194,10 +188,9 @@ class VasicekModel(InterestRateModel):
         scramble: bool = True,
     ) -> np.ndarray:
         """Simulate short rate r(t) paths under Vasicek."""
-        n_steps = len(times) - 1
-        dt_vec = np.diff(times)
-        r_paths = np.zeros((n_paths, n_steps + 1), dtype=np.float64)
-        r_paths[:, 0] = self.r0_ann
+        times_arr = np.asarray(times, dtype=np.float64)
+        n_steps = len(times_arr) - 1
+        dt_vec = np.diff(times_arr)
 
         if dw is None:
             dw_matrix = generate_brownian_increments(
@@ -210,20 +203,15 @@ class VasicekModel(InterestRateModel):
                 rng=rng,
             )
         else:
-            dw_matrix = dw
+            dw_matrix = np.asarray(dw, dtype=np.float64)
 
-        for step in range(n_steps):
-            dt = dt_vec[step]
-            if abs(self.kappa_ann) < 1e-12:
-                decay = 1.0
-                mean_term = 0.0
-            else:
-                decay = np.exp(-self.kappa_ann * dt)
-                mean_term = self.theta_ann * (1.0 - decay)
-            r_paths[:, step + 1] = (
-                r_paths[:, step] * decay
-                + mean_term
-                + self.sigma_ann * dw_matrix[:, step]
-            )
-
-        return r_paths
+        return vasicek_simulate_paths_kernel(
+            n_paths=n_paths,
+            n_steps=n_steps,
+            dt_vec=dt_vec,
+            kappa=self.kappa_ann,
+            theta=self.theta_ann,
+            sigma=self.sigma_ann,
+            r0=self.r0_ann,
+            dw_matrix=dw_matrix,
+        )

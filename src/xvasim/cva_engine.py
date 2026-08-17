@@ -9,8 +9,9 @@ estimation for path-wise CVA aggregation.
 Public API
 ----------
 - :class:`CIRParams` — calibrated CIR model parameters.
+- :func:`compute_cva` — path-wise CVA aggregation with numexpr and chunking.
+- :func:`compute_cva_chunked` — generator/iterable streaming CVA aggregation.
 - :func:`compute_marginal_pd` — marginal default probabilities from spreads.
-- :func:`compute_cva` — path-wise CVA aggregation.
 
 Units & Conventions
 -------------------
@@ -20,15 +21,27 @@ Units & Conventions
 
 from __future__ import annotations
 
+import typing
+
 import numpy as np
 from scipy.optimize import minimize
 
+from .jit import cir_calibration_objective_kernel, cir_survival_probability_kernel
 from .models.base import CreditModel
 from .models.credit.cir import CIRParams
+
+try:
+    import numexpr as _ne  # type: ignore[import-not-found]
+
+    HAS_NUMEXPR = True
+except Exception:  # pragma: no cover
+    HAS_NUMEXPR = False
+    _ne = None
 
 __all__ = [
     "CIRParams",
     "compute_cva",
+    "compute_cva_chunked",
     "compute_marginal_pd",
 ]
 
@@ -67,21 +80,14 @@ def _cir_survival_probability(
     Returns:
         1-D array of survival probabilities at each tenor.
     """
-    kappa = params.kappa_ann
-    theta = params.theta_ann
-    sigma = params.sigma_ann
-    lam0 = params.lambda_0_ann
-
-    gamma = np.sqrt(kappa**2 + 2 * sigma**2)
-    exp_gamma_t = np.exp(gamma * tenors_yrs)
-    denominator = (kappa + gamma) * (exp_gamma_t - 1) + 2 * gamma
-
-    power = (2 * kappa * theta) / (sigma**2)
-    numerator_a = 2 * gamma * np.exp((kappa + gamma) * tenors_yrs / 2)
-    a_t = (numerator_a / denominator) ** power
-    b_t = 2 * (exp_gamma_t - 1) / denominator
-
-    return a_t * np.exp(-b_t * lam0)  # type: ignore[no-any-return]
+    tenors_arr = np.asarray(tenors_yrs, dtype=np.float64)
+    return cir_survival_probability_kernel(
+        tenors_arr,
+        params.kappa_ann,
+        params.theta_ann,
+        params.sigma_ann,
+        params.lambda_0_ann,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -120,20 +126,29 @@ def _calibrate_cir(
     Raises:
         RuntimeError: If the optimisation fails to converge.
     """
+    spreads = np.asarray(credit_spreads_ann, dtype=np.float64)
+    tenors = np.asarray(tenors_yrs, dtype=np.float64)
+
+    if (
+        len(spreads) == 0
+        or len(tenors) == 0
+        or np.isnan(spreads).any()
+        or np.isnan(tenors).any()
+    ):
+        msg = (
+            "CIR calibration failed: input spreads or tenors contain NaN "
+            "or are empty"
+        )
+        raise RuntimeError(msg)
 
     def objective(params_vec: np.ndarray) -> float:
-        cir = CIRParams(*params_vec)
-        surv_prob = _cir_survival_probability(tenors_yrs, cir)
-        model_spreads_ann = -np.log(np.maximum(surv_prob, 1e-15)) / np.maximum(
-            tenors_yrs, 1e-10
-        )
-        return float(np.sum((model_spreads_ann - credit_spreads_ann) ** 2))
+        return cir_calibration_objective_kernel(params_vec, tenors, spreads)
 
     x0 = [
         0.1,
-        float(np.mean(credit_spreads_ann)),
+        float(np.mean(spreads)),
         0.05,
-        float(credit_spreads_ann[0]),
+        float(spreads[0]),
     ]
     bounds = [
         (1e-4, 5.0),
@@ -143,7 +158,7 @@ def _calibrate_cir(
     ]
 
     result = minimize(objective, x0, bounds=bounds, method="L-BFGS-B")
-    if not result.success:
+    if not result.success or np.isnan(result.x).any():
         msg = f"CIR calibration failed: {result.message}"
         raise RuntimeError(msg)
 
@@ -198,6 +213,8 @@ def compute_cva(
     marginal_pd: np.ndarray,
     discount_factor: np.ndarray,
     loss_given_default: float,
+    chunk_size: int | None = None,
+    use_numexpr: bool = True,
 ) -> float:
     r"""Calculate the Credit Valuation Adjustment (CVA) of a counterparty.
 
@@ -207,21 +224,116 @@ def compute_cva(
         \sum_{j=1}^{N_{\text{dates}}}
         E_{i,j}\;\Delta\text{PD}_{i,j}\;D_{i,j}
 
+    Supports memory-efficient evaluation via chunking and **Numexpr** acceleration
+    to avoid large intermediate array allocations for massive simulation grids.
+
     Args:
         exposure: 2-D array of shape ``(n_paths, n_dates)`` containing
             portfolio exposure values.
-        marginal_pd: 2-D array of shape ``(n_paths, n_dates)`` containing
+        marginal_pd: Array of shape ``(n_paths, n_dates)`` or ``(n_dates,)`` containing
             marginal default probabilities for each period (dimensionless).
-        discount_factor: 2-D array of shape ``(n_paths, n_dates)`` containing
-            risk-free discount factors.
+        discount_factor: Array of shape ``(n_paths, n_dates)`` or ``(n_dates,)``
+            containing risk-free discount factors.
         loss_given_default: Loss given default (decimal, e.g. 0.60 for 60 %).
+        chunk_size: Optional integer batch size for chunked evaluation over paths.
+        use_numexpr: If True and Numexpr is available, accelerates element-wise
+            reduction while eliminating peak memory allocations.
 
     Returns:
         The average CVA value across all paths.
     """
+    exp_arr = np.asarray(exposure, dtype=np.float64)
+    n_paths = exp_arr.shape[0]
+
+    if n_paths == 0:
+        return 0.0
+
+    pd_arr = np.asarray(marginal_pd, dtype=np.float64)
+    df_arr = np.asarray(discount_factor, dtype=np.float64)
+    lgd = float(loss_given_default)
+
+    # Chunked evaluation
+    if chunk_size is not None and chunk_size > 0 and chunk_size < n_paths:
+        total_sum = 0.0
+        for start_idx in range(0, n_paths, chunk_size):
+            end_idx = min(start_idx + chunk_size, n_paths)
+            exp_chunk = exp_arr[start_idx:end_idx]
+            pd_chunk = pd_arr[start_idx:end_idx] if pd_arr.ndim == 2 else pd_arr
+            df_chunk = df_arr[start_idx:end_idx] if df_arr.ndim == 2 else df_arr
+
+            if use_numexpr and HAS_NUMEXPR and _ne is not None:
+                chunk_val = float(
+                    _ne.evaluate("sum(exp_chunk * pd_chunk * df_chunk * lgd)")
+                )
+            else:
+                chunk_val = float(np.sum(exp_chunk * pd_chunk * df_chunk * lgd))
+            total_sum += chunk_val
+
+        return float(total_sum / n_paths)
+
+    # Full array evaluation
+    if use_numexpr and HAS_NUMEXPR and _ne is not None:
+        total_val = float(_ne.evaluate("sum(exp_arr * pd_arr * df_arr * lgd)"))
+        return float(total_val / n_paths)
+
     path_cva = np.sum(
-        exposure * marginal_pd * discount_factor * loss_given_default,
+        exp_arr * pd_arr * df_arr * lgd,
         axis=1,
         keepdims=True,
     )
     return float(np.mean(path_cva))
+
+
+def compute_cva_chunked(
+    exposure_chunks: typing.Iterable[np.ndarray],
+    marginal_pd: np.ndarray,
+    discount_factor: np.ndarray,
+    loss_given_default: float,
+    use_numexpr: bool = True,
+) -> float:
+    """Calculate CVA over a stream or generator of exposure matrix chunks.
+
+    Memory-efficient aggregator for massive portfolios where the complete exposure
+    matrix exceeds system RAM.
+
+    Args:
+        exposure_chunks: Iterable/generator yielding 2-D arrays of shape
+            ``(chunk_paths, n_dates)``.
+        marginal_pd: Array of shape ``(n_dates,)`` or matching 2-D shape.
+        discount_factor: Array of shape ``(n_dates,)`` or matching 2-D shape.
+        loss_given_default: Loss given default (e.g. 0.60).
+        use_numexpr: If True and Numexpr is available, accelerates evaluation.
+
+    Returns:
+        The average CVA value across all aggregated paths.
+    """
+    total_weighted_cva = 0.0
+    total_paths = 0
+
+    pd_arr = np.asarray(marginal_pd, dtype=np.float64)
+    df_arr = np.asarray(discount_factor, dtype=np.float64)
+    lgd = float(loss_given_default)
+
+    for chunk in exposure_chunks:
+        exp_chunk = np.asarray(chunk, dtype=np.float64)
+        c_paths = exp_chunk.shape[0]
+        if c_paths == 0:
+            continue
+
+        pd_chunk = pd_arr[:c_paths] if pd_arr.ndim == 2 else pd_arr
+        df_chunk = df_arr[:c_paths] if df_arr.ndim == 2 else df_arr
+
+        if use_numexpr and HAS_NUMEXPR and _ne is not None:
+            chunk_sum = float(
+                _ne.evaluate("sum(exp_chunk * pd_chunk * df_chunk * lgd)")
+            )
+        else:
+            chunk_sum = float(np.sum(exp_chunk * pd_chunk * df_chunk * lgd))
+
+        total_weighted_cva += chunk_sum
+        total_paths += c_paths
+
+    if total_paths == 0:
+        return 0.0
+
+    return float(total_weighted_cva / total_paths)

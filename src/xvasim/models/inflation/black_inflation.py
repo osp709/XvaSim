@@ -201,8 +201,10 @@ class BlackInflationModel(InflationModel):
         total_std = self._cpi_vol_ann * np.sqrt(maturity_yrs)
 
         if total_std < 1e-12:
-            intrinsic = max(fwd_ratio - k_compound, 0.0) if is_call else max(
-                k_compound - fwd_ratio, 0.0
+            intrinsic = (
+                max(fwd_ratio - k_compound, 0.0)
+                if is_call
+                else max(k_compound - fwd_ratio, 0.0)
             )
             return float(notional * p_nom * intrinsic)
 

@@ -1,15 +1,15 @@
-"""Hull-White 1-Factor (HW1F) interest rate model implementation.
+r"""Hull-White 1-Factor (HW1F) interest rate model implementation.
 
 This module implements the classic 1-Factor Hull-White short-rate model:
 
 .. math::
-    dr(t) = (\\theta(t) - a r(t))\\,dt + \\sigma\\,dW(t)
+    dr(t) = (\theta(t) - a r(t))\,dt + \sigma\,dW(t)
 
 with exact calibration to the initial discount curve :math:`P(0, t)`:
 
 .. math::
-    \\theta(t) = \\frac{\\partial f(0, t)}{\\partial t} + a f(0, t)
-    + \\frac{\\sigma^2}{2a}\\left(1 - e^{-2at}\\right)
+    \theta(t) = \frac{\partial f(0, t)}{\partial t} + a f(0, t)
+    + \frac{\sigma^2}{2a}\left(1 - e^{-2at}\right)
 
 Public API
 ----------
@@ -23,6 +23,7 @@ import dataclasses
 
 import numpy as np
 
+from ...jit import discount_path_kernel
 from ...qmc import RandomSequenceType, generate_brownian_increments
 from ..base import InterestRateModel
 from ..registry import ModelRegistry
@@ -174,20 +175,15 @@ class HullWhite1FModel(InterestRateModel):
         state_paths: np.ndarray,
     ) -> np.ndarray:
         """Compute path-wise discount factors D(0, t_i) using simulated short rates."""
-        n_paths, n_times = state_paths.shape
-        short_rates = np.zeros_like(state_paths)
+        times_arr = np.asarray(times, dtype=np.float64)
+        paths_arr = np.asarray(state_paths, dtype=np.float64)
+        n_paths, n_times = paths_arr.shape
+        short_rates = np.empty((n_paths, n_times), dtype=np.float64)
         for j in range(n_times):
-            t = times[j]
-            short_rates[:, j] = self.short_rate(t, state_paths[:, j])
+            t = times_arr[j]
+            short_rates[:, j] = self.short_rate(t, paths_arr[:, j])
 
-        dt_vec = np.diff(times)
-        cum_integral = np.zeros((n_paths, n_times))
-        for j in range(1, n_times):
-            cum_integral[:, j] = cum_integral[:, j - 1] + 0.5 * dt_vec[j - 1] * (
-                short_rates[:, j - 1] + short_rates[:, j]
-            )
-
-        return np.exp(-cum_integral)
+        return discount_path_kernel(times_arr, short_rates)
 
     def simulate_paths(
         self,
@@ -200,8 +196,9 @@ class HullWhite1FModel(InterestRateModel):
         scramble: bool = True,
     ) -> np.ndarray:
         """Simulate Hull-White state variable x(t) paths: dx = -a x dt + sigma dW."""
-        n_steps = len(times) - 1
-        dt_vec = np.diff(times)
+        times_arr = np.asarray(times, dtype=np.float64)
+        n_steps = len(times_arr) - 1
+        dt_vec = np.diff(times_arr)
         x_paths = np.zeros((n_paths, n_steps + 1), dtype=np.float64)
 
         if dw is None:
@@ -215,7 +212,7 @@ class HullWhite1FModel(InterestRateModel):
                 rng=rng,
             )
         else:
-            dw_matrix = dw
+            dw_matrix = np.asarray(dw, dtype=np.float64)
 
         for step in range(n_steps):
             dt = dt_vec[step]

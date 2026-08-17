@@ -230,6 +230,45 @@ graph TD
 
 ---
 
+## 📁 Repository & Test Suite Layout
+
+```
+XvaSim/
+├── pyproject.toml              # Build & dependency config (Hatchling, uv, ruff, pyrefly, pytest, coverage)
+├── README.md                   # Human & LLM documentation
+├── GEMINI.md                   # AI assistant context & developer guide
+├── src/
+│   └── xvasim/
+│       ├── __init__.py         # Package root exports
+│       ├── cva_engine.py       # CVA calculation & credit model integration
+│       ├── pricing_engine.py   # MC & analytical pricing for IR, FX & inflation derivatives
+│       ├── qmc.py              # Quasi-Monte Carlo sequences & variance reduction
+│       ├── utils.py            # Date conversion (dates_to_years)
+│       └── models/             # Modular stochastic models framework
+│           ├── __init__.py     # Models package exports
+│           ├── base.py         # Base ABCs (RiskFactorType, StochasticModel, InterestRateModel, etc.)
+│           ├── registry.py     # ModelRegistry & dynamic factory functions
+│           ├── ir/             # Interest rate models (LGM, Hull-White 1F, Vasicek, CIR)
+│           ├── credit/         # Credit models (CIR hazard rate)
+│           ├── fx/             # FX models (TwoCurrencyFXModel, GarmanKohlhagenFXModel, HestonFXModel)
+│           └── inflation/      # Inflation models (JarrowYildirimModel, BlackInflationModel)
+└── tests/                      # Full test suite (Dual compatibility: Pytest & Unittest)
+    ├── conftest.py             # Shared pytest fixtures & configuration
+    ├── helpers/                # Test curve builders & assertion helpers
+    │   ├── assertions.py       # Statistical and pricing comparison assertions
+    │   └── test_curves.py      # Flat, upward, and downward mock discount curves
+    ├── unit/                   # Isolated unit tests
+    │   ├── cva/                # CVA calculation & CIR calibration tests
+    │   ├── models/             # Model-specific tests (IR, FX, Credit, Inflation, base, registry)
+    │   ├── pricing/            # Pricing engine tests (IRS, XCCY, FX, Inflation, internals)
+    │   ├── qmc/                # Quasi-Monte Carlo variate & convergence tests
+    │   └── utils/              # Helper utilities tests
+    ├── integration/            # Multi-model simulations & portfolio CVA pipeline tests
+    └── benchmarks/             # Analytical benchmark vs Monte Carlo convergence tests
+```
+
+---
+
 ## 📐 Units & Naming Conventions
 
 Strictly enforced across all public APIs and parameters:
@@ -310,6 +349,7 @@ print(f"Forward Annuity (PV01): {mc_result['annuity']:,.4f}")
 ### 2. Pricing a Cross-Currency Swap (XCCY)
 
 ```python
+import numpy as np
 from xvasim import (
     HullWhite1FModel,
     SwapLegType,
@@ -317,8 +357,12 @@ from xvasim import (
     price_cross_currency_swap,
 )
 
-dom_ir = HullWhite1FModel(a_ann=0.03, sigma_ann=0.01, discount_curve_yrs=tenors_yrs, discount_factors=dfs)
-for_ir = HullWhite1FModel(a_ann=0.02, sigma_ann=0.008, discount_curve_yrs=tenors_yrs, discount_factors=np.exp(-0.015 * tenors_yrs))
+tenors_yrs = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0])
+dom_dfs = np.exp(-0.03 * tenors_yrs)
+for_dfs = np.exp(-0.015 * tenors_yrs)
+
+dom_ir = HullWhite1FModel(a_ann=0.03, sigma_ann=0.01, discount_curve_yrs=tenors_yrs, discount_factors=dom_dfs)
+for_ir = HullWhite1FModel(a_ann=0.02, sigma_ann=0.008, discount_curve_yrs=tenors_yrs, discount_factors=for_dfs)
 
 fx_model = TwoCurrencyFXModel(
     domestic_ir_model=dom_ir,
@@ -353,6 +397,7 @@ print(f"Fair Foreign Spread:     {xccy_res['fair_foreign_spread'] * 10_000:.2f} 
 ### 3. Pricing Inflation Derivatives (ZCIS & CPI Options)
 
 ```python
+import numpy as np
 from xvasim import (
     BlackInflationModel,
     OptionType,
@@ -360,6 +405,7 @@ from xvasim import (
     price_zero_coupon_inflation_swap,
 )
 
+tenors_yrs = np.array([0.0, 1.0, 2.0, 3.0, 5.0, 10.0])
 nom_dfs = np.exp(-0.035 * tenors_yrs)
 real_dfs = np.exp(-0.015 * tenors_yrs)
 
@@ -471,13 +517,19 @@ for method, stats in comparison["methods"].items():
 ## 🧪 Testing & Verification Commands
 
 ```bash
-# Run full unit test suite
+# Run full unit & benchmark test suite via Pytest
+uv run pytest tests/ -v
+
+# Run full test suite via standard Unittest
 uv run python -m unittest discover tests
 
-# Linting and formatting checks
+# Measure test coverage with strict 95% threshold enforcement
+uv run coverage run -m pytest tests/
+uv run coverage report -m
+
+# Linting and formatting checks (Ruff)
 uv run ruff check .
 
-# Strict static type checking (mypy on Python 3.14)
-uv run mypy .
+# Strict static type checking (Pyrefly on Python 3.14)
+uv run pyrefly check
 ```
-

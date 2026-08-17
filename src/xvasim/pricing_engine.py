@@ -639,12 +639,8 @@ def benchmark_price_foreign_exchange_forward(
         )
         spot = float(params.spot_fx)
     elif isinstance(params, TwoCurrencyFXModel):
-        df_d = float(
-            params.domestic_ir_model.interpolate_discount_factor(maturity_yrs)
-        )
-        df_f = float(
-            params.foreign_ir_model.interpolate_discount_factor(maturity_yrs)
-        )
+        df_d = float(params.domestic_ir_model.interpolate_discount_factor(maturity_yrs))
+        df_f = float(params.foreign_ir_model.interpolate_discount_factor(maturity_yrs))
         spot = float(params.spot_fx)
     elif isinstance(params, FXModel):
         if hasattr(params, "domestic_discount_factor") and hasattr(
@@ -657,10 +653,7 @@ def benchmark_price_foreign_exchange_forward(
             df_f = 1.0
         spot = float(params.spot_fx) if hasattr(params, "spot_fx") else 1.0
     else:
-        msg = (
-            f"params must be FXLGMParams or FXModel, "
-            f"got {type(params).__name__}"
-        )
+        msg = f"params must be FXLGMParams or FXModel, got {type(params).__name__}"
         raise TypeError(msg)
 
     fwd_fx = spot * (df_f / max(df_d, 1e-18))
@@ -755,10 +748,7 @@ def price_foreign_exchange_forward(
         else:
             df_t = np.ones(n_paths, dtype=np.float64)
     else:
-        msg = (
-            f"params must be FXLGMParams or FXModel, "
-            f"got {type(params).__name__}"
-        )
+        msg = f"params must be FXLGMParams or FXModel, got {type(params).__name__}"
         raise TypeError(msg)
 
     payoff = notional * (s_t - strike) * df_t
@@ -869,14 +859,10 @@ def benchmark_price_foreign_exchange_option(
             vol = float(params.fx_vol_ann)
         else:
             df_d = float(
-                params.domestic_ir_model.interpolate_discount_factor(
-                    maturity_yrs
-                )
+                params.domestic_ir_model.interpolate_discount_factor(maturity_yrs)
             )
             df_f = float(
-                params.foreign_ir_model.interpolate_discount_factor(
-                    maturity_yrs
-                )
+                params.foreign_ir_model.interpolate_discount_factor(maturity_yrs)
             )
             spot = float(params.spot_fx)
             vol = float(params.fx_vol_ann)
@@ -885,18 +871,14 @@ def benchmark_price_foreign_exchange_option(
         total_std = vol * np.sqrt(maturity_yrs)
         if total_std < 1e-12:
             intrinsic = (
-                max(fwd_fx - strike, 0.0)
-                if is_call
-                else max(strike - fwd_fx, 0.0)
+                max(fwd_fx - strike, 0.0) if is_call else max(strike - fwd_fx, 0.0)
             )
             return {
                 "price": float(notional * df_d * intrinsic),
                 "forward_fx": float(fwd_fx),
             }
 
-        d1 = (
-            np.log(fwd_fx / strike) + 0.5 * vol * vol * maturity_yrs
-        ) / total_std
+        d1 = (np.log(fwd_fx / strike) + 0.5 * vol * vol * maturity_yrs) / total_std
         d2 = d1 - total_std
         if is_call:
             pv = (
@@ -908,10 +890,7 @@ def benchmark_price_foreign_exchange_option(
             pv = (
                 notional
                 * df_d
-                * (
-                    strike * float(norm.cdf(-d2))
-                    - fwd_fx * float(norm.cdf(-d1))
-                )
+                * (strike * float(norm.cdf(-d2)) - fwd_fx * float(norm.cdf(-d1)))
             )
 
         return {"price": float(pv), "forward_fx": float(fwd_fx)}
@@ -1030,10 +1009,7 @@ def price_foreign_exchange_option(
         else:
             df_t = np.ones(n_paths, dtype=np.float64)
     else:
-        msg = (
-            f"params must be FXLGMParams or FXModel, "
-            f"got {type(params).__name__}"
-        )
+        msg = f"params must be FXLGMParams or FXModel, got {type(params).__name__}"
         raise TypeError(msg)
 
     if resolved is OptionType.CALL:
@@ -1107,16 +1083,12 @@ def benchmark_price_zero_coupon_inflation_swap(
     if hasattr(model, "interpolate_nominal_df"):
         p_nom = float(model.interpolate_nominal_df(maturity_yrs))
     elif hasattr(model, "nominal_ir_model"):
-        p_nom = float(
-            model.nominal_ir_model.interpolate_discount_factor(maturity_yrs)
-        )
+        p_nom = float(model.nominal_ir_model.interpolate_discount_factor(maturity_yrs))
     else:
         p_nom = 1.0
 
     fwd_float_comp = (forward_cpi_val / model.base_cpi) - 1.0
-    unit_net = (
-        (fwd_float_comp - k_comp) if is_payer else (k_comp - fwd_float_comp)
-    )
+    unit_net = (fwd_float_comp - k_comp) if is_payer else (k_comp - fwd_float_comp)
     price = notional * p_nom * unit_net
     return {
         "price": float(price),
@@ -1192,9 +1164,7 @@ def price_zero_coupon_inflation_swap(
 
     k_comp = (1.0 + strike_rate_ann) ** maturity_yrs - 1.0
     float_payoff = (cpi_t / model.base_cpi) - 1.0
-    net_payoff = (
-        (float_payoff - k_comp) if is_payer else (k_comp - float_payoff)
-    )
+    net_payoff = (float_payoff - k_comp) if is_payer else (k_comp - float_payoff)
     pv_paths = notional * net_payoff * df_t
 
     price = float(np.mean(pv_paths))
@@ -1285,9 +1255,7 @@ def price_year_on_year_inflation_swap(
         fixed_return = fixed_rate_ann * dt_period
 
         net_return = (
-            (float_return - fixed_return)
-            if is_payer
-            else (fixed_return - float_return)
+            (float_return - fixed_return) if is_payer else (fixed_return - float_return)
         )
         period_pv = notional * net_return * df_curr
         total_pv_paths += period_pv
@@ -1366,9 +1334,7 @@ def benchmark_price_consumer_price_index_option(
         return {"price": price_val, "forward_cpi": float(forward_cpi_val)}
 
     if isinstance(model, JarrowYildirimModel):
-        p_nom = float(
-            model.nominal_ir_model.interpolate_discount_factor(maturity_yrs)
-        )
+        p_nom = float(model.nominal_ir_model.interpolate_discount_factor(maturity_yrs))
         tot_var = model.total_variance_at(maturity_yrs)
         total_std = np.sqrt(max(tot_var, 1e-16))
 
@@ -1388,13 +1354,11 @@ def benchmark_price_consumer_price_index_option(
 
         if is_call:
             pv = p_nom * (
-                fwd_ratio * float(norm.cdf(d1))
-                - k_comp * float(norm.cdf(d2))
+                fwd_ratio * float(norm.cdf(d1)) - k_comp * float(norm.cdf(d2))
             )
         else:
             pv = p_nom * (
-                k_comp * float(norm.cdf(-d2))
-                - fwd_ratio * float(norm.cdf(-d1))
+                k_comp * float(norm.cdf(-d2)) - fwd_ratio * float(norm.cdf(-d1))
             )
         return {
             "price": float(notional * pv),
@@ -1533,10 +1497,7 @@ def _parse_swap_leg_type(
     elif isinstance(leg_type, SwapLegType):
         return leg_type
     else:
-        msg = (
-            f"{name} must be a SwapLegType or str, "
-            f"got {type(leg_type).__name__}"
-        )
+        msg = f"{name} must be a SwapLegType or str, got {type(leg_type).__name__}"
         raise TypeError(msg)
 
 
@@ -1560,9 +1521,7 @@ def _generate_swap_schedule(
             raise ValueError("pay_freq_yrs must be strictly positive.")
         n_periods = max(1, int(np.round(tenor_yrs / pay_freq_yrs)))
         dt = tenor_yrs / n_periods
-        return np.array(
-            [(k + 1) * dt for k in range(n_periods)], dtype=np.float64
-        )
+        return np.array([(k + 1) * dt for k in range(n_periods)], dtype=np.float64)
     else:
         raise ValueError("Must provide either tenor_yrs or payment_times_yrs.")
 
@@ -1683,9 +1642,7 @@ def price_interest_rate_swap(
         - ``"period_cash_flows"`` — List of detailed period cash flow dictionaries.
     """
     ir_model = _get_ir_model(model)
-    pay_times = _generate_swap_schedule(
-        tenor_yrs, payment_times_yrs, pay_freq_yrs
-    )
+    pay_times = _generate_swap_schedule(tenor_yrs, payment_times_yrs, pay_freq_yrs)
     n_periods = len(pay_times)
 
     # Period boundaries: T_0 = 0.0, T_1, ..., T_n
@@ -1711,9 +1668,7 @@ def price_interest_rate_swap(
     fair_swap_rate = float((p_0 - p_n) / max(annuity, 1e-18))
 
     fixed_leg_pv_analytical = float(notional * fixed_rate_ann * annuity)
-    floating_leg_pv_analytical = float(
-        notional * ((p_0 - p_n) + spread_ann * annuity)
-    )
+    floating_leg_pv_analytical = float(notional * ((p_0 - p_n) + spread_ann * annuity))
 
     # Analytical period cash flows
     period_cfs: list[dict[str, float]] = []
@@ -1729,17 +1684,19 @@ def price_interest_rate_swap(
         float_cf = notional * (fwd_rate + spread_ann) * tau
         net_cf = (float_cf - fixed_cf) if is_payer else (fixed_cf - float_cf)
 
-        period_cfs.append({
-            "start_time_yrs": t_s,
-            "end_time_yrs": t_e,
-            "year_fraction_yrs": tau,
-            "discount_factor": df_e,
-            "forward_rate_ann": fwd_rate,
-            "fixed_payment": fixed_cf,
-            "floating_payment": float_cf,
-            "net_payment": net_cf,
-            "discounted_net_pv": net_cf * df_e,
-        })
+        period_cfs.append(
+            {
+                "start_time_yrs": t_s,
+                "end_time_yrs": t_e,
+                "year_fraction_yrs": tau,
+                "discount_factor": df_e,
+                "forward_rate_ann": fwd_rate,
+                "fixed_payment": fixed_cf,
+                "floating_payment": float_cf,
+                "net_payment": net_cf,
+                "discounted_net_pv": net_cf * df_e,
+            }
+        )
 
     price_analytical = (
         floating_leg_pv_analytical - fixed_leg_pv_analytical
@@ -1796,9 +1753,7 @@ def price_interest_rate_swap(
 
         if t_s == 0.0:
             df_init = float(ir_model.interpolate_discount_factor(t_e))
-            l_rates = np.full(
-                n_paths, (1.0 / df_init - 1.0) / tau, dtype=np.float64
-            )
+            l_rates = np.full(n_paths, (1.0 / df_init - 1.0) / tau, dtype=np.float64)
         else:
             state_at_reset = x_paths[:, idx_s]
             p_reset_end = ir_model.zero_coupon_bond(t_s, t_e, state_at_reset)
@@ -2012,9 +1967,7 @@ def price_cross_currency_swap(
         else for_notional * spot_fx
     )
 
-    pay_times = _generate_swap_schedule(
-        tenor_yrs, payment_times_yrs, pay_freq_yrs
-    )
+    pay_times = _generate_swap_schedule(tenor_yrs, payment_times_yrs, pay_freq_yrs)
     n_periods = len(pay_times)
 
     t_starts = np.insert(pay_times[:-1], 0, 0.0)
@@ -2046,8 +1999,7 @@ def price_cross_currency_swap(
         dom_leg_pv = dom_notional * domestic_rate_ann * annuity_dom
     else:
         dom_leg_pv = dom_notional * (
-            (df_d_starts[0] - df_d_ends[-1])
-            + domestic_spread_ann * annuity_dom
+            (df_d_starts[0] - df_d_ends[-1]) + domestic_spread_ann * annuity_dom
         )
 
     # Foreign leg PV (in foreign currency)
@@ -2072,13 +2024,9 @@ def price_cross_currency_swap(
 
     # Net swap price (analytical)
     if is_domestic_payer:
-        price_analytical = (
-            for_leg_pv_domestic - dom_leg_pv + notional_exchange_pv
-        )
+        price_analytical = for_leg_pv_domestic - dom_leg_pv + notional_exchange_pv
     else:
-        price_analytical = (
-            dom_leg_pv - for_leg_pv_domestic - notional_exchange_pv
-        )
+        price_analytical = dom_leg_pv - for_leg_pv_domestic - notional_exchange_pv
 
     # Fair rate / spread solving (analytical)
     target_for_pv_dom = dom_leg_pv - notional_exchange_pv
@@ -2092,10 +2040,7 @@ def price_cross_currency_swap(
     else:
         fair_foreign_rate = 0.0
         fair_foreign_spread = float(
-            (
-                target_for_pv_for / for_notional
-                - (df_f_starts[0] - df_f_ends[-1])
-            )
+            (target_for_pv_for / for_notional - (df_f_starts[0] - df_f_ends[-1]))
             / max(annuity_for, 1e-18)
         )
 
@@ -2166,9 +2111,7 @@ def price_cross_currency_swap(
         else:
             if t_s == 0.0:
                 df_d_0_e = float(dom_ir.interpolate_discount_factor(t_e))
-                l_d = np.full(
-                    n_paths, (1.0 / df_d_0_e - 1.0) / tau, dtype=np.float64
-                )
+                l_d = np.full(n_paths, (1.0 / df_d_0_e - 1.0) / tau, dtype=np.float64)
             else:
                 p_d_mat = dom_ir.zero_coupon_bond(t_s, t_e, x_dom[:, idx_s])
                 l_d = (1.0 / np.maximum(p_d_mat, 1e-18) - 1.0) / tau
@@ -2182,9 +2125,7 @@ def price_cross_currency_swap(
         else:
             if t_s == 0.0:
                 df_f_0_e = float(for_ir.interpolate_discount_factor(t_e))
-                l_f = np.full(
-                    n_paths, (1.0 / df_f_0_e - 1.0) / tau, dtype=np.float64
-                )
+                l_f = np.full(n_paths, (1.0 / df_f_0_e - 1.0) / tau, dtype=np.float64)
             else:
                 p_f_mat = for_ir.zero_coupon_bond(t_s, t_e, x_for[:, idx_s])
                 l_f = (1.0 / np.maximum(p_f_mat, 1e-18) - 1.0) / tau
@@ -2228,5 +2169,3 @@ def price_cross_currency_swap(
 
 # Convenience alias for cross-currency swaps
 price_xccy_swap = price_cross_currency_swap
-
-

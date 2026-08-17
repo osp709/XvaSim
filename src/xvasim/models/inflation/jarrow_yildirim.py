@@ -440,9 +440,7 @@ class JarrowYildirimModel(InflationModel):
 
             # CPI index evolution
             drift_cpi = r_n_step - r_r_step - 0.5 * vol_cpi**2
-            ln_cpi[:, step + 1] = (
-                ln_cpi[:, step] + drift_cpi * dt + vol_cpi * dw_cpi
-            )
+            ln_cpi[:, step + 1] = ln_cpi[:, step] + drift_cpi * dt + vol_cpi * dw_cpi
 
         # Final short rates
         t_end = times[-1]

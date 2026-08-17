@@ -7,14 +7,18 @@ name = "xvasim"
 version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
+    "numba>=0.60.0",
+    "numexpr>=2.8.0",
     "scipy>=1.18.0",
 ]
 
 [dependency-groups]
 dev = [
-    "mypy>=2.1.0",
+    "coverage>=7.15.4",
     "numpy>=2.5.1",
     "pyrefly>=1.1.1",
+    "pytest>=9.1.1",
+    "pytest-cov>=6.0.0",
     "ruff>=0.15.20",
 ]
 
@@ -42,23 +46,48 @@ ignore = [
     "RUF002", # Ambiguous Unicode character in docstring
     "RUF003", # Ambiguous Unicode character in comment
 ]
-[tool.mypy]
-python_version = "3.14"
-strict = true
-warn_unused_configs = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-disallow_untyped_defs = true
-check_untyped_defs = true
-explicit_package_bases = true
-mypy_path = "src"
 
-[[tool.mypy.overrides]]
-module = [
-    "scipy.*",
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra --strict-markers"
+markers = [
+    "unit: Fast, isolated unit tests",
+    "integration: End-to-end multi-asset or pipeline tests",
+    "benchmark: Analytical vs Monte Carlo convergence benchmarks",
+    "slow: Tests with higher Monte Carlo path counts",
 ]
-ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["src/xvasim"]
+branch = true
+omit = []
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 95
+precision = 1
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if typing.TYPE_CHECKING:",
+    "@typing.overload",
+    "@overload",
+    "@abstractmethod",
+    "@abc.abstractmethod",
+]
 
 [tool.pyrefly]
 python-version = "3.14.0"
 preset = "legacy"
+search-path = [".", "src"]

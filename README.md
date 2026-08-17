@@ -183,12 +183,53 @@ $$S_0(T) = \left( \frac{P_r(0, T)}{P_n(0, T)} \right)^{1/T} - 1$$
 
 ---
 
+## 🚀 High-Performance Acceleration & Hardware Backends
+
+`XvaSim` is engineered for ultra-low latency and scalable enterprise risk workloads through 5 core performance optimizations:
+
+1. **JIT Compilation (`xvasim.jit`)**:
+   - Native Numba `@njit(fastmath=True, nogil=True)` compiled kernels for simulation stepping loops: `cir_simulate_paths_kernel`, `lgm_simulate_paths_kernel`, `vasicek_simulate_paths_kernel`, `hull_white_simulate_paths_kernel`, `heston_simulate_paths_kernel`, and `discount_path_kernel`.
+   - Transparent fallback when Numba is not installed or when `NUMBA_DISABLE_JIT=1` is set.
+2. **Hardware Acceleration (GPU) & Tensor Backend (`xvasim.backend`)**:
+   - Unified `TensorBackend` abstract interface supporting **NumPy** (CPU default), **PyTorch** (CPU/CUDA/MPS), **CuPy** (CUDA GPU), and **JAX** (XLA CPU/GPU/TPU).
+   - Dynamic backend selection and context scoping via `get_backend()`, `set_backend()`, and `use_backend()`.
+3. **Memory Efficiency & Streaming CVA Aggregation (`xvasim.cva_engine`)**:
+   - `compute_cva(..., chunk_size=..., use_numexpr=True)` evaluates path-wise CVA in memory-friendly chunks using `numexpr` C-level multi-threaded vector evaluation.
+   - `compute_cva_chunked` processes streams/generators of exposure blocks for massive portfolio risk runs exceeding system RAM.
+4. **Fast CIR Credit Calibration**:
+   - Purely numeric, Numba-compiled objective functions (`cir_calibration_objective_kernel` and `cir_survival_probability_kernel`) evaluated directly over 1D contiguous arrays without repetitive dataclass object allocation in L-BFGS-B iterations.
+5. **QMC Sequence Caching & Stateful Generation (`xvasim.qmc`)**:
+   - Thread-safe `QMCSequenceCache` with LRU eviction and hit/miss tracking.
+   - `QMCSequenceGenerator` maintaining sequential generator state across simulation blocks for fast bump-and-reval Greeks and sensitivities.
+   - `cached_normal_draws` and `use_cache=True` parameter on `generate_normal_draws` and `generate_brownian_increments`.
+
+---
+
 ## 🏗️ System Architecture
 
 ```mermaid
 graph TD
+    subgraph HardwareBackend ["Hardware Acceleration & Backends (xvasim.backend)"]
+        TensorABC["TensorBackend ABC"]
+        NPBackend["NumPyBackend (CPU Default)"]
+        TorchBackend["PyTorchBackend (CPU / CUDA / MPS)"]
+        CuPyBackend["CuPyBackend (CUDA GPU)"]
+        JAXBackend["JAXBackend (XLA CPU / GPU / TPU)"]
+        
+        TensorABC --> NPBackend
+        TensorABC --> TorchBackend
+        TensorABC --> CuPyBackend
+        TensorABC --> JAXBackend
+    end
+
+    subgraph JITEngine ["Numba JIT Numerical Acceleration (xvasim.jit)"]
+        JITKernels["Compiled Simulation Kernels <br> cir, lgm, vasicek, hull_white, heston, discount_path"]
+        JITCalib["Compiled Calibration Objective & Survival Kernels"]
+    end
+
     subgraph QMCEngine ["Quasi-Monte Carlo & Variance Reduction (xvasim.qmc)"]
         QMCSeq["RandomSequenceType (Sobol, Halton, LHS, PRNG)"]
+        QMCCache["QMCSequenceCache & QMCSequenceGenerator"]
         QMCGen["Variate Generation (generate_normal_draws, generate_brownian_increments)"]
         QMCBench["Benchmarking (compare_t0_npv_fitting)"]
     end
@@ -218,9 +259,13 @@ graph TD
     subgraph Pricing Engines ["Pricing & Valuation Engines (xvasim)"]
         MCPricers["Primary Monte Carlo Pricers <br> price_interest_rate_swap, price_cross_currency_swap <br> price_foreign_exchange_forward, price_foreign_exchange_option <br> price_zero_coupon_inflation_swap, price_year_on_year_inflation_swap, price_consumer_price_index_option"]
         Benchmarks["Analytical Benchmarks <br> benchmark_price_interest_rate_swap, benchmark_price_cross_currency_swap <br> benchmark_price_foreign_exchange_forward, benchmark_price_foreign_exchange_option <br> benchmark_price_zero_coupon_inflation_swap, benchmark_price_consumer_price_index_option"]
-        CVAEngine["CVA Engine <br> compute_cva, compute_marginal_pd"]
+        CVAEngine["CVA Engine (Chunked & Numexpr) <br> compute_cva, compute_cva_chunked, compute_marginal_pd"]
     end
 
+    HardwareBackend --> Modular Models
+    HardwareBackend --> MCPricers
+    JITEngine --> Modular Models
+    JITEngine --> CVAEngine
     QMCEngine --> Modular Models
     QMCEngine --> MCPricers
     Modular Models --> MCPricers
@@ -240,9 +285,11 @@ XvaSim/
 ├── src/
 │   └── xvasim/
 │       ├── __init__.py         # Package root exports
-│       ├── cva_engine.py       # CVA calculation & credit model integration
+│       ├── backend.py          # TensorBackend hardware abstraction (NumPy, PyTorch, CuPy, JAX)
+│       ├── cva_engine.py       # CVA calculation, chunked evaluation & credit calibration
+│       ├── jit.py              # Numba JIT simulation kernels & numerical routines
 │       ├── pricing_engine.py   # MC & analytical pricing for IR, FX & inflation derivatives
-│       ├── qmc.py              # Quasi-Monte Carlo sequences & variance reduction
+│       ├── qmc.py              # QMC sequences, sequence caching & variance reduction
 │       ├── utils.py            # Date conversion (dates_to_years)
 │       └── models/             # Modular stochastic models framework
 │           ├── __init__.py     # Models package exports
@@ -262,6 +309,8 @@ XvaSim/
     │   ├── models/             # Model-specific tests (IR, FX, Credit, Inflation, base, registry)
     │   ├── pricing/            # Pricing engine tests (IRS, XCCY, FX, Inflation, internals)
     │   ├── qmc/                # Quasi-Monte Carlo variate & convergence tests
+    │   ├── test_backend.py     # Hardware acceleration & tensor backend tests
+    │   ├── test_jit.py         # Compiled numerical kernels tests
     │   └── utils/              # Helper utilities tests
     ├── integration/            # Multi-model simulations & portfolio CVA pipeline tests
     └── benchmarks/             # Analytical benchmark vs Monte Carlo convergence tests
@@ -510,6 +559,82 @@ comparison = compare_t0_npv_fitting(
 for method, stats in comparison["methods"].items():
     vrf = stats.get("variance_reduction_factor", 1.0)
     print(f"{method:>8}: Variance={stats['variance']:.4f}, VRF={vrf:.1f}x, MAE={stats['mean_absolute_error']:.4f}")
+```
+
+### 6. Hardware Acceleration & Multi-Device Tensor Backends
+
+```python
+import numpy as np
+from xvasim import (
+    available_backends,
+    get_backend,
+    is_backend_available,
+    use_backend,
+)
+
+print(f"Available Backends: {[b.value for b in available_backends()]}")
+
+# 1. Inspect current active backend
+backend = get_backend()
+print(f"Default Active Backend: {backend.name.value} on {backend.device}")
+
+# 2. Execute risk calculations in scoped PyTorch or GPU context (if installed)
+if is_backend_available("torch"):
+    with use_backend("torch", device="cuda:0") as gpu_backend:
+        data = gpu_backend.linspace(0.0, 5.0, 10)
+        exp_data = gpu_backend.exp(data)
+        print(f"Executed on GPU backend: {gpu_backend.device}")
+```
+
+### 7. Stateful QMC Generator & Cached Sequence Sensitivity Analysis
+
+```python
+import numpy as np
+from xvasim import (
+    QMCSequenceGenerator,
+    RandomSequenceType,
+    cached_normal_draws,
+    clear_qmc_cache,
+)
+
+# 1. Draw cached normal variates for fast bump-and-reval Greeks
+draws_base = cached_normal_draws(n_paths=10_000, dimension=5, random_type="sobol", seed=42)
+draws_bumped = cached_normal_draws(n_paths=10_000, dimension=5, random_type="sobol", seed=42)
+assert draws_base is not draws_bumped  # Isolated copies returned from cache
+
+# 2. Stateful sequence progression across simulation batches
+generator = QMCSequenceGenerator(dimension=4, random_type=RandomSequenceType.SOBOL, seed=42)
+batch_1 = generator.draw(n_paths=2048)
+batch_2 = generator.draw(n_paths=2048)
+print(f"Total points drawn consecutively: {generator.total_drawn}")
+clear_qmc_cache()
+```
+
+### 8. Memory-Efficient Streaming CVA on Massive Portfolios
+
+```python
+import numpy as np
+from xvasim import compute_cva_chunked
+
+n_dates = 10
+marginal_pd = np.full(n_dates, 0.005)
+discount_factor = np.exp(-0.03 * np.linspace(0.5, 5.0, n_dates))
+
+# Generator streaming 100,000 paths in memory-friendly 10,000-path chunks
+def stream_portfolio_exposure():
+    rng = np.random.default_rng(42)
+    for _ in range(10):
+        yield np.maximum(rng.standard_normal((10_000, n_dates)) * 100_000.0, 0.0)
+
+# Compute aggregated CVA across all 100k paths without RAM overflow
+streamed_cva = compute_cva_chunked(
+    exposure_chunks=stream_portfolio_exposure(),
+    marginal_pd=marginal_pd,
+    discount_factor=discount_factor,
+    loss_given_default=0.60,
+    use_numexpr=True,
+)
+print(f"Streaming Portfolio CVA: ${streamed_cva:,.2f}")
 ```
 
 ---

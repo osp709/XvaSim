@@ -30,7 +30,12 @@ This document provides system instructions, architectural context, mathematical 
    - Low-discrepancy generators: `RandomSequenceType` (`SOBOL`, `HALTON`, `LATIN_HYPERCUBE`, `PSEUDO`).
    - Variate generation: `generate_normal_draws` (scrambled inverse-CDF) and `generate_brownian_increments`.
    - Convergence diagnostics: `compare_t0_npv_fitting` for T0 NPV accuracy and variance reduction factor (VRF) benchmarking.
-   - Uniform `random_type`, `seed`, and `scramble` parameters across all models and pricers.
+   - Thread-safe `QMCSequenceCache` and stateful `QMCSequenceGenerator` for fast Greek bump-and-reval sensitivities.
+   - Uniform `random_type`, `seed`, `scramble`, and `use_cache` parameters across all models and pricers.
+5. **High-Performance JIT & Hardware Acceleration** (`xvasim.jit`, `xvasim.backend`):
+   - Numba `@njit(fastmath=True, nogil=True)` compiled kernels for simulation stepping and discount integration.
+   - Unified `TensorBackend` abstract interface supporting NumPy (CPU), PyTorch (CPU/CUDA/MPS), CuPy (CUDA), and JAX (CPU/GPU/TPU).
+   - Scoped backend execution with `use_backend`, `set_backend`, and `get_backend`.
 
 ---
 
@@ -52,9 +57,11 @@ XvaSim/
 ├── src/
 │   └── xvasim/
 │       ├── __init__.py         # Package root exports
-│       ├── cva_engine.py       # CVA calculation & credit model integration
+│       ├── backend.py          # TensorBackend hardware abstraction (NumPy, PyTorch, CuPy, JAX)
+│       ├── cva_engine.py       # CVA calculation, chunked evaluation & credit calibration
+│       ├── jit.py              # Numba JIT simulation kernels & numerical routines
 │       ├── pricing_engine.py   # MC & analytical pricing for IR, FX & inflation derivatives
-│       ├── qmc.py              # Quasi-Monte Carlo sequences & variance reduction
+│       ├── qmc.py              # QMC sequences, sequence caching & variance reduction
 │       ├── utils.py            # Date conversion (dates_to_years)
 │       └── models/             # Modular stochastic models framework
 │           ├── __init__.py     # Models package exports
@@ -74,6 +81,8 @@ XvaSim/
     │   ├── models/             # Model-specific tests (IR, FX, Credit, Inflation, base, registry)
     │   ├── pricing/            # Pricing engine tests (IRS, XCCY, FX, Inflation, internals)
     │   ├── qmc/                # Quasi-Monte Carlo variate & convergence tests
+    │   ├── test_backend.py     # Hardware acceleration & tensor backend tests
+    │   ├── test_jit.py         # Compiled numerical kernels tests
     │   └── utils/              # Helper utilities tests
     ├── integration/            # Multi-model simulations & portfolio CVA pipeline tests
     └── benchmarks/             # Analytical benchmark vs Monte Carlo convergence tests

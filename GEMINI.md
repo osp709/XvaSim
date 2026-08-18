@@ -208,3 +208,29 @@ All 5 core performance optimizations are implemented in the codebase:
 5. **Hardware Acceleration (GPU) & Tensor Backend Abstraction (`xvasim.backend`)**:
    - Unified `TensorBackend` abstract interface with concrete backends: `NumPyBackend` (CPU default), `PyTorchBackend` (CPU/CUDA/MPS), `CuPyBackend` (CUDA), and `JAXBackend` (XLA CPU/GPU/TPU).
    - Dynamic backend selection and context scoping via `get_backend()`, `set_backend()`, and `use_backend()`.
+
+---
+
+## 🏛️ Implemented Architectural Refactors (Model-Agnostic APIs)
+
+To enforce a completely modular, pluggable, and decoupled stochastic model framework, the codebase implements model-agnostic abstractions and dispatchers while maintaining 100% backwards compatibility:
+
+1. **Model-Agnostic IR Calibration & Analytical Swaption Pricing (`xvasim.pricing_engine`, `xvasim.models.ir`)**:
+   - Canonical function: `calibrate_ir_model_to_swaptions(..., model_type="lgm")` provides a generic interface that dispatches to the underlying model's calibration routine.
+   - Convenience alias: `calibrate_lgm_to_swaptions` is preserved for full backwards compatibility.
+   - Analytical helper: `_swaption_price_normal` (with `_lgm_swaption_price_normal` alias).
+   - Model base class methods: `InterestRateModel.swaption_price_normal` and `InterestRateModel.analytical_swaption_price` are defined on the base ABC and implemented on `LGMModel`.
+
+2. **Model-Agnostic Credit Calibration & Survival Engine (`xvasim.cva_engine`, `xvasim.models.credit`)**:
+   - Canonical function: `_calibrate_credit_model(spreads, tenors, model_type="cir")` provides model-agnostic dispatch (with `_calibrate_cir` alias).
+   - Survival probability: `_credit_model_survival_probability(tenors, model_or_params)` accepts any `CreditModel` or legacy parameter dataclass (with `_cir_survival_probability` alias).
+   - Model classmethod: `CreditModel.calibrate_from_spreads` and `CIRHazardRateModel.calibrate_from_spreads` allow credit models to self-calibrate given market CDS spreads.
+
+3. **Decoupled Multi-Factor Models (`xvasim.models.fx`, `xvasim.models.inflation`)**:
+   - Multi-factor FX: `TwoCurrencyFXModel.from_ir_models` and `from_components` construct multi-currency FX models from arbitrary `InterestRateModel` instances or `LGMParams` (`from_lgm_params` preserved as alias).
+   - Multi-economy Inflation: `JarrowYildirimModel.from_ir_models` and `from_components` construct two-economy inflation models from arbitrary nominal and real `InterestRateModel` instances or `LGMParams` (`from_lgm_params` preserved as alias).
+
+4. **Encapsulated JIT Kernels & Generic Dispatcher (`xvasim.jit`)**:
+   - Specialized simulation kernels are encapsulated with private implementations (`_cir_simulate_paths_kernel`, `_lgm_simulate_paths_kernel`, `_vasicek_simulate_paths_kernel`, `_hull_white_simulate_paths_kernel`, `_heston_simulate_paths_kernel`).
+   - Unified dispatcher: `simulate_model_paths_kernel(model_type, ...)` dynamically routes simulation stepping calls based on model type.
+   - Generic credit kernels: `credit_survival_probability_kernel` and `credit_calibration_objective_kernel` (with `cir_*` aliases).

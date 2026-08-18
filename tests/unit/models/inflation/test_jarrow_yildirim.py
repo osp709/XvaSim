@@ -98,7 +98,7 @@ class TestJarrowYildirimModel(unittest.TestCase):
         )
 
     def test_from_lgm_params(self) -> None:
-        """Verify constructor from LGMParams."""
+        """Verify constructor from LGMParams, from_ir_models, and from_components."""
         nom_p = LGMParams(
             0.03, np.array([30.0]), np.array([0.01]), self.tenors, self.nom_dfs
         )
@@ -114,6 +114,28 @@ class TestJarrowYildirimModel(unittest.TestCase):
         )
         self.assertIsInstance(mdl, JarrowYildirimModel)
         self.assertEqual(mdl.base_cpi, 105.0)
+
+        # from_ir_models with LGMParams
+        mdl_ir = JarrowYildirimModel.from_ir_models(
+            nominal=nom_p,
+            real=real_p,
+            base_cpi=105.0,
+            cpi_vol_ann=0.025,
+            correlation_matrix=self.corr,
+        )
+        self.assertIsInstance(mdl_ir, JarrowYildirimModel)
+        self.assertIsInstance(mdl_ir.nominal_ir_model, LGMModel)
+
+        # from_components with InterestRateModel instances
+        mdl_comp = JarrowYildirimModel.from_components(
+            nominal=self.nom_hw,
+            real=self.real_hw,
+            base_cpi=105.0,
+            cpi_vol_ann=0.025,
+            correlation_matrix=self.corr,
+        )
+        self.assertIs(mdl_comp.nominal_ir_model, self.nom_hw)
+        self.assertIs(mdl_comp.real_ir_model, self.real_hw)
 
     def test_forward_cpi_and_swap_rate(self) -> None:
         """Verify forward CPI and fair swap rate calculation."""

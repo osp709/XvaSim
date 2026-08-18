@@ -1,4 +1,4 @@
-"""LGM-based and modular Monte Carlo pricing engine for derivatives.
+"""Model-agnostic analytical and Monte Carlo pricing engine for derivatives.
 
 This module implements analytical and Monte Carlo derivative pricing for:
 - Foreign exchange forwards and European currency options.
@@ -7,17 +7,25 @@ This module implements analytical and Monte Carlo derivative pricing for:
 - Multi-currency / Cross-Currency Swaps (XCCY) supporting fixed-for-floating,
   fixed-for-fixed, and floating-for-floating (basis) structures.
 
+All pricing routines operate on abstract model interfaces
+(:class:`~xvasim.models.base.InterestRateModel`,
+:class:`~xvasim.models.base.FXModel`,
+:class:`~xvasim.models.base.InflationModel`) while maintaining full backwards
+compatibility with legacy parameter dataclasses (:class:`LGMParams`,
+:class:`FXLGMParams`).
+
 Public API
 ----------
-- :class:`LGMParams` — single-currency calibrated LGM parameters.
+- :class:`LGMParams` — single-currency calibrated LGM parameters (re-exported).
 - :class:`FXLGMParams` — two-currency + FX spot model parameters.
 - :class:`OptionType` — enumeration of supported option types.
 - :class:`SwapLegType` — enumeration of supported swap leg types.
-- :func:`calibrate_lgm_to_swaptions` — calibrate ``σ(t)`` to swaptions.
+- :func:`calibrate_ir_model_to_swaptions` (alias ``calibrate_lgm_to_swaptions``) —
+  calibrate interest rate model ``σ(t)`` to swaptions.
 - :func:`price_foreign_exchange_forward` (alias ``price_fx_forward``) —
-  MC price a currency forward.
+  price a currency forward.
 - :func:`price_foreign_exchange_option` (alias ``price_fx_option``) —
-  MC price a European currency option.
+  price a European currency option.
 - :func:`price_interest_rate_swap` (alias ``price_irs``) —
   price single-currency IRS.
 - :func:`price_cross_currency_swap` (alias ``price_xccy_swap``) —
@@ -25,7 +33,7 @@ Public API
 - :func:`price_zero_coupon_inflation_swap` —
   price zero-coupon inflation swaps.
 - :func:`price_year_on_year_inflation_swap` (alias
-  ``price_yoy_inflation_swap``) — MC price year-on-year inflation swaps.
+  ``price_yoy_inflation_swap``) — price year-on-year inflation swaps.
 - :func:`price_consumer_price_index_option` (alias ``price_cpi_option``) —
   price European CPI index options / inflation caps & floors.
 
@@ -50,7 +58,7 @@ from .models.fx.two_currency import TwoCurrencyFXModel
 from .models.inflation.black_inflation import BlackInflationModel
 from .models.inflation.jarrow_yildirim import JarrowYildirimModel
 from .models.ir.lgm import LGMModel, LGMParams
-from .qmc import RandomSequenceType, generate_normal_draws
+from .qmc import RandomSequenceType
 
 __all__ = [
     "FXLGMParams",
@@ -68,6 +76,7 @@ __all__ = [
     "benchmark_price_irs",
     "benchmark_price_xccy_swap",
     "benchmark_price_zero_coupon_inflation_swap",
+    "calibrate_ir_model_to_swaptions",
     "calibrate_lgm_to_swaptions",
     "price_consumer_price_index_option",
     "price_cpi_option",
@@ -111,7 +120,7 @@ class FXLGMParams:
 
 
 class OptionType(enum.Enum):
-    """Supported FX option types for :func:`price_fx_option`.
+    """Supported option payoff types.
 
     Members:
         CALL: European call — payoff ``N × max(S(T) − K, 0)``.
@@ -135,7 +144,43 @@ class SwapLegType(enum.Enum):
 
 
 # ---------------------------------------------------------------------------
-# LGM helper functions
+# Internal Model Resolution Helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_fx_model(params: FXModel | FXLGMParams) -> FXModel:
+    """Resolve an FXModel or convert legacy FXLGMParams into TwoCurrencyFXModel."""
+    if isinstance(params, FXModel):
+        return params
+    elif isinstance(params, FXLGMParams):
+        return TwoCurrencyFXModel.from_ir_models(
+            domestic=params.domestic,
+            foreign=params.foreign,
+            spot_fx=params.spot_fx,
+            fx_vol_ann=params.fx_vol_ann,
+            correlation_matrix=params.correlation_matrix,
+        )
+    else:
+        msg = f"params must be FXModel or FXLGMParams, got {type(params).__name__}"
+        raise TypeError(msg)
+
+
+def _get_ir_model(model: InterestRateModel | LGMParams) -> InterestRateModel:
+    """Wrap legacy LGMParams in LGMModel if necessary."""
+    if isinstance(model, InterestRateModel):
+        return model
+    elif isinstance(model, LGMParams):
+        return LGMModel(model)
+    else:
+        msg = (
+            f"model must be an InterestRateModel or LGMParams, "
+            f"got {type(model).__name__}"
+        )
+        raise TypeError(msg)
+
+
+# ---------------------------------------------------------------------------
+# LGM helper functions (Retained for backwards compatibility)
 # ---------------------------------------------------------------------------
 
 
@@ -231,11 +276,11 @@ def _interpolate_discount_factor(
 
 
 # ---------------------------------------------------------------------------
-# LGM swaption calibration
+# Interest rate swaption calibration & normal pricing
 # ---------------------------------------------------------------------------
 
 
-def _lgm_swaption_price_normal(
+def _swaption_price_normal(
     expiry_yrs: float,
     swap_tenor_yrs: float,
     market_normal_vol_ann: float,
@@ -247,11 +292,11 @@ def _lgm_swaption_price_normal(
     fixed_rate_ann: float,
     pay_freq_yrs: float = 0.5,
 ) -> tuple[float, float]:
-    """Compute the LGM model swaption price and the market swaption price.
+    """Compute the model swaption price and the market swaption price.
 
-    Both are expressed as *normal (Bachelier)* prices. The LGM normal vol
-    for a co-terminal swaption is approximated by the *annuity-weighted*
-    H-function dispersion:
+    Both are expressed as *normal (Bachelier)* prices. For LGM-based interest
+    rate models, the normal vol for a co-terminal swaption is approximated by
+    the *annuity-weighted* H-function dispersion:
 
     .. math::
         V_{\\text{lgm}}^2 = \\frac{\\zeta(T_0)}{T_0}
@@ -265,7 +310,7 @@ def _lgm_swaption_price_normal(
         swap_tenor_yrs: Underlying swap tenor in years.
         market_normal_vol_ann: Market-observed normal (Bachelier) volatility
             (annualised, e.g. 0.0050 for 50 bp/yr).
-        kappa: LGM mean reversion.
+        kappa: Model mean reversion.
         sigma_grid_yrs: Current volatility breakpoints.
         sigma_values_ann: Current piecewise-constant volatilities.
         curve_yrs: Discount curve tenors.
@@ -306,7 +351,10 @@ def _lgm_swaption_price_normal(
     return float(model_price), float(market_price)
 
 
-def calibrate_lgm_to_swaptions(
+_lgm_swaption_price_normal = _swaption_price_normal
+
+
+def calibrate_ir_model_to_swaptions(
     swaption_expiries_yrs: np.ndarray,
     swap_tenors_yrs: np.ndarray,
     market_normal_vols_ann: np.ndarray,
@@ -315,12 +363,13 @@ def calibrate_lgm_to_swaptions(
     fixed_rates_ann: np.ndarray,
     kappa_ann: float = 0.03,
     pay_freq_yrs: float = 0.5,
+    model_type: str = "lgm",
 ) -> LGMParams:
-    """Calibrate an LGM volatility function to a set of swaptions.
+    """Calibrate an interest rate model volatility structure to a set of swaptions.
 
-    The calibration proceeds *bootstrapping style*: for each swaption
-    (ordered by expiry), a root-finding step determines the piecewise-
-    constant volatility on the interval ending at that expiry, so that
+    For LGM models, the calibration proceeds *bootstrapping style*: for each
+    swaption (ordered by expiry), a root-finding step determines the
+    piecewise-constant volatility on the interval ending at that expiry, so that
     the model price matches the market price.
 
     Args:
@@ -336,13 +385,23 @@ def calibrate_lgm_to_swaptions(
             underlying swap (usually set to the ATM forward swap rate).
         kappa_ann: Mean-reversion speed (annualised). Default 0.03.
         pay_freq_yrs: Fixed-leg payment frequency in years. Default 0.5.
+        model_type: Interest rate model category (default ``"lgm"``).
 
     Returns:
-        A fully populated :class:`LGMParams` instance.
+        A calibrated model parameters instance (e.g. :class:`LGMParams`).
 
     Raises:
+        ValueError: If an unsupported *model_type* is supplied.
         RuntimeError: If any single-expiry root-finding fails.
     """
+    model_key = model_type.strip().lower()
+    if model_key not in ("lgm", "linear_gauss_markov"):
+        msg = (
+            f"Swaption calibration currently supports 'lgm', "
+            f"got model_type='{model_type}'"
+        )
+        raise ValueError(msg)
+
     n = len(swaption_expiries_yrs)
     sigma_grid = np.array(swaption_expiries_yrs, dtype=np.float64)
     sigma_vals = np.zeros(n, dtype=np.float64)
@@ -357,7 +416,7 @@ def calibrate_lgm_to_swaptions(
         ) -> float:
             partial_vals = sigma_vals[: idx + 1].copy()
             partial_vals[idx] = sigma_i
-            model_p, market_p = _lgm_swaption_price_normal(
+            model_p, market_p = _swaption_price_normal(
                 expiry_yrs=float(swaption_expiries_yrs[idx]),
                 swap_tenor_yrs=float(swap_tenors_yrs[idx]),
                 market_normal_vol_ann=float(market_normal_vols_ann[idx]),
@@ -389,8 +448,11 @@ def calibrate_lgm_to_swaptions(
     )
 
 
+calibrate_lgm_to_swaptions = calibrate_ir_model_to_swaptions
+
+
 # ---------------------------------------------------------------------------
-# Monte Carlo simulation
+# Monte Carlo simulation helpers (Retained for backwards compatibility)
 # ---------------------------------------------------------------------------
 
 
@@ -426,123 +488,22 @@ def _simulate_fx_paths(
         ``(n_paths, n_steps + 1)`` except *times* which is
         ``(n_steps + 1,)``.
     """
-    dt = maturity_yrs / n_steps
-    sqrt_dt = np.sqrt(dt)
-    times = np.linspace(0.0, maturity_yrs, n_steps + 1)
-
-    chol = np.linalg.cholesky(params.correlation_matrix)
-
-    x_dom = np.zeros((n_paths, n_steps + 1))
-    x_for = np.zeros((n_paths, n_steps + 1))
-    ln_fx = np.zeros((n_paths, n_steps + 1))
-    ln_fx[:, 0] = np.log(params.spot_fx)
-
-    kd = params.domestic.kappa_ann
-    kf = params.foreign.kappa_ann
-    vol_fx = params.fx_vol_ann
-
-    z_all = generate_normal_draws(
+    model = TwoCurrencyFXModel.from_ir_models(
+        domestic=params.domestic,
+        foreign=params.foreign,
+        spot_fx=params.spot_fx,
+        fx_vol_ann=params.fx_vol_ann,
+        correlation_matrix=params.correlation_matrix,
+    )
+    return model.simulate_paths(
+        maturity_yrs=maturity_yrs,
         n_paths=n_paths,
-        dimension=3 * n_steps,
+        n_steps=n_steps,
+        rng=rng,
         random_type=random_type,
         seed=seed,
         scramble=scramble,
-        rng=rng,
-    ).reshape(n_paths, n_steps, 3)
-
-    for step in range(n_steps):
-        t = times[step]
-
-        sig_d = float(
-            params.domestic.sigma_values_ann[
-                min(
-                    int(
-                        np.searchsorted(params.domestic.sigma_grid_yrs, t, side="right")
-                    ),
-                    len(params.domestic.sigma_values_ann) - 1,
-                )
-            ]
-        )
-        sig_f = float(
-            params.foreign.sigma_values_ann[
-                min(
-                    int(
-                        np.searchsorted(params.foreign.sigma_grid_yrs, t, side="right")
-                    ),
-                    len(params.foreign.sigma_values_ann) - 1,
-                )
-            ]
-        )
-
-        z_indep = z_all[:, step, :]
-        z_corr = z_indep @ chol.T
-
-        dw_d = z_corr[:, 0] * sqrt_dt
-        dw_f = z_corr[:, 1] * sqrt_dt
-        dw_fx = z_corr[:, 2] * sqrt_dt
-
-        x_dom[:, step + 1] = x_dom[:, step] - kd * x_dom[:, step] * dt + sig_d * dw_d
-
-        rho_f_fx = params.correlation_matrix[1, 2]
-        x_for[:, step + 1] = (
-            x_for[:, step]
-            - kf * x_for[:, step] * dt
-            - sig_f * rho_f_fx * vol_fx * dt
-            + sig_f * dw_f
-        )
-
-        df_d_t = float(
-            _interpolate_discount_factor(
-                t, params.domestic.discount_curve_yrs, params.domestic.discount_factors
-            )
-        )
-        df_d_t1 = float(
-            _interpolate_discount_factor(
-                t + dt,
-                params.domestic.discount_curve_yrs,
-                params.domestic.discount_factors,
-            )
-        )
-        df_f_t = float(
-            _interpolate_discount_factor(
-                t, params.foreign.discount_curve_yrs, params.foreign.discount_factors
-            )
-        )
-        df_f_t1 = float(
-            _interpolate_discount_factor(
-                t + dt,
-                params.foreign.discount_curve_yrs,
-                params.foreign.discount_factors,
-            )
-        )
-
-        fwd_d = -np.log(df_d_t1 / df_d_t) / dt
-        fwd_f = -np.log(df_f_t1 / df_f_t) / dt
-
-        h_prime_d = np.exp(-kd * t)
-        h_prime_f = np.exp(-kf * t)
-
-        zeta_d = _compute_zeta(
-            t,
-            params.domestic.sigma_grid_yrs,
-            params.domestic.sigma_values_ann,
-            kd,
-        )
-        zeta_f = _compute_zeta(
-            t,
-            params.foreign.sigma_grid_yrs,
-            params.foreign.sigma_values_ann,
-            kf,
-        )
-
-        r_d = fwd_d + h_prime_d * x_dom[:, step] + 0.5 * h_prime_d**2 * zeta_d
-        r_f = fwd_f + h_prime_f * x_for[:, step] + 0.5 * h_prime_f**2 * zeta_f
-
-        drift_fx = r_d - r_f - 0.5 * vol_fx**2
-        ln_fx[:, step + 1] = ln_fx[:, step] + drift_fx * dt + vol_fx * dw_fx
-
-    fx_spot = np.exp(ln_fx)
-    return times, x_dom, x_for, fx_spot
+    )
 
 
 def _discount_path(
@@ -560,25 +521,7 @@ def _discount_path(
     Returns:
         Array of discount factors ``D(0, tᵢ)`` with same shape as *x_state*.
     """
-    n_paths, n_times = x_state.shape
-    kappa = lgm.kappa_ann
-
-    short_rates = np.zeros_like(x_state)
-    for j in range(n_times):
-        t = times[j]
-        h_prime = np.exp(-kappa * t)
-        fwd = _instantaneous_forward(t, lgm.discount_curve_yrs, lgm.discount_factors)
-        zeta = _compute_zeta(t, lgm.sigma_grid_yrs, lgm.sigma_values_ann, kappa)
-        short_rates[:, j] = fwd + h_prime * x_state[:, j] + 0.5 * h_prime**2 * zeta
-
-    dt_vec = np.diff(times)
-    cum_integral = np.zeros((n_paths, n_times))
-    for j in range(1, n_times):
-        cum_integral[:, j] = cum_integral[:, j - 1] + 0.5 * dt_vec[j - 1] * (
-            short_rates[:, j - 1] + short_rates[:, j]
-        )
-
-    return np.exp(-cum_integral)
+    return LGMModel(lgm).discount_path(times, x_state)
 
 
 def _instantaneous_forward(
@@ -612,8 +555,8 @@ def benchmark_price_foreign_exchange_forward(
     """Analytical benchmark pricing for currency forwards via Covered Interest Parity.
 
     Args:
-        params: Two-currency model parameters, either :class:`FXLGMParams` or
-            a modular :class:`~xvasim.models.base.FXModel`.
+        params: Foreign exchange model, either an instantiated
+            :class:`~xvasim.models.base.FXModel` or legacy :class:`FXLGMParams`.
         strike: Forward strike (domestic per foreign).
         maturity_yrs: Maturity in years.
         notional: Notional amount in foreign currency.
@@ -622,39 +565,22 @@ def benchmark_price_foreign_exchange_forward(
         Dictionary with ``"price"``, ``"forward_fx"``, ``"domestic_df"``,
         and ``"foreign_df"``.
     """
-    if isinstance(params, FXLGMParams):
-        df_d = float(
-            _interpolate_discount_factor(
-                maturity_yrs,
-                params.domestic.discount_curve_yrs,
-                params.domestic.discount_factors,
-            )
-        )
-        df_f = float(
-            _interpolate_discount_factor(
-                maturity_yrs,
-                params.foreign.discount_curve_yrs,
-                params.foreign.discount_factors,
-            )
-        )
-        spot = float(params.spot_fx)
-    elif isinstance(params, TwoCurrencyFXModel):
-        df_d = float(params.domestic_ir_model.interpolate_discount_factor(maturity_yrs))
-        df_f = float(params.foreign_ir_model.interpolate_discount_factor(maturity_yrs))
-        spot = float(params.spot_fx)
-    elif isinstance(params, FXModel):
-        if hasattr(params, "domestic_discount_factor") and hasattr(
-            params, "foreign_discount_factor"
-        ):
-            df_d = float(params.domestic_discount_factor(maturity_yrs))
-            df_f = float(params.foreign_discount_factor(maturity_yrs))
-        else:
-            df_d = 1.0
-            df_f = 1.0
-        spot = float(params.spot_fx) if hasattr(params, "spot_fx") else 1.0
+    model = _resolve_fx_model(params)
+
+    if isinstance(model, TwoCurrencyFXModel):
+        df_d = float(model.domestic_ir_model.interpolate_discount_factor(maturity_yrs))
+        df_f = float(model.foreign_ir_model.interpolate_discount_factor(maturity_yrs))
+        spot = float(model.spot_fx)
+    elif hasattr(model, "domestic_discount_factor") and hasattr(
+        model, "foreign_discount_factor"
+    ):
+        df_d = float(model.domestic_discount_factor(maturity_yrs))
+        df_f = float(model.foreign_discount_factor(maturity_yrs))
+        spot = float(getattr(model, "spot_fx", 1.0))
     else:
-        msg = f"params must be FXLGMParams or FXModel, got {type(params).__name__}"
-        raise TypeError(msg)
+        df_d = 1.0
+        df_f = 1.0
+        spot = float(getattr(model, "spot_fx", 1.0))
 
     fwd_fx = spot * (df_f / max(df_d, 1e-18))
     price = notional * (fwd_fx - strike) * df_d
@@ -681,14 +607,14 @@ def price_foreign_exchange_forward(
     random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
     scramble: bool = True,
 ) -> dict[str, float | np.ndarray]:
-    """Price a currency forward via Monte Carlo under LGM or modular FX models.
+    """Price a currency forward via Monte Carlo under any modular FX model.
 
     The forward buyer receives ``N × (S(T) − K)`` at maturity *T*, discounted
     to today using the domestic bank account.
 
     Args:
-        params: Two-currency model parameters, either :class:`FXLGMParams` or
-            a modular :class:`~xvasim.models.base.FXModel`.
+        params: Foreign exchange model, either an instantiated
+            :class:`~xvasim.models.base.FXModel` or legacy :class:`FXLGMParams`.
         strike: Forward strike (domestic per foreign).
         maturity_yrs: Maturity in years.
         notional: Notional amount in foreign currency.
@@ -706,9 +632,10 @@ def price_foreign_exchange_forward(
         - ``"analytical_benchmark_price"`` — exact analytical benchmark price.
         - ``"fx_terminal"`` — 1-D array of terminal FX rates.
     """
-    if isinstance(params, FXLGMParams):
-        times, x_dom, _x_for, fx_paths = _simulate_fx_paths(
-            params,
+    model = _resolve_fx_model(params)
+
+    if isinstance(model, TwoCurrencyFXModel):
+        times, x_dom, _x_for, fx_paths = model.simulate_paths(
             maturity_yrs,
             n_paths,
             n_steps,
@@ -717,10 +644,10 @@ def price_foreign_exchange_forward(
             scramble=scramble,
         )
         s_t = fx_paths[:, -1]
-        dom_df = _discount_path(params.domestic, x_dom, times)
+        dom_df = model.domestic_ir_model.discount_path(times, x_dom)
         df_t = dom_df[:, -1]
-    elif isinstance(params, TwoCurrencyFXModel):
-        times, x_dom, _x_for, fx_paths = params.simulate_paths(
+    else:
+        sim_res = model.simulate_paths(
             maturity_yrs,
             n_paths,
             n_steps,
@@ -728,28 +655,13 @@ def price_foreign_exchange_forward(
             seed=seed,
             scramble=scramble,
         )
+        fx_paths = sim_res[-1] if isinstance(sim_res, tuple) else sim_res
         s_t = fx_paths[:, -1]
-        dom_df = params.domestic_ir_model.discount_path(times, x_dom)
-        df_t = dom_df[:, -1]
-    elif isinstance(params, FXModel):
-        sim_res = params.simulate_paths(
-            maturity_yrs,
-            n_paths,
-            n_steps,
-            random_type=random_type,
-            seed=seed,
-            scramble=scramble,
-        )
-        fx_paths = sim_res[-1]
-        s_t = fx_paths[:, -1]
-        if hasattr(params, "domestic_discount_factor"):
-            df_val = float(params.domestic_discount_factor(maturity_yrs))
+        if hasattr(model, "domestic_discount_factor"):
+            df_val = float(model.domestic_discount_factor(maturity_yrs))
             df_t = np.full(n_paths, df_val, dtype=np.float64)
         else:
             df_t = np.ones(n_paths, dtype=np.float64)
-    else:
-        msg = f"params must be FXLGMParams or FXModel, got {type(params).__name__}"
-        raise TypeError(msg)
 
     payoff = notional * (s_t - strike) * df_t
     price = float(np.mean(payoff))
@@ -783,9 +695,13 @@ def benchmark_price_foreign_exchange_option(
 ) -> dict[str, float]:
     r"""Analytical benchmark pricing for European currency options.
 
+    Supports analytical closed-form evaluation under any FX model with analytical
+    pricing capabilities (e.g. Garman-Kohlhagen, Heston semi-analytical, or
+    Two-Currency lognormal spot diffusion).
+
     Args:
-        params: Two-currency model parameters, either :class:`FXLGMParams` or
-            a modular :class:`~xvasim.models.base.FXModel`.
+        params: Foreign exchange model, either an instantiated
+            :class:`~xvasim.models.base.FXModel` or legacy :class:`FXLGMParams`.
         strike: Option strike (domestic per foreign).
         maturity_yrs: Expiry in years.
         notional: Notional in foreign currency.
@@ -813,9 +729,10 @@ def benchmark_price_foreign_exchange_option(
         raise TypeError(msg)
 
     is_call = resolved is OptionType.CALL
+    model = _resolve_fx_model(params)
 
-    if hasattr(params, "price_option_analytical"):
-        res = params.price_option_analytical(
+    if hasattr(model, "price_option_analytical"):
+        res = model.price_option_analytical(
             strike=strike,
             maturity_yrs=maturity_yrs,
             notional=notional,
@@ -825,13 +742,13 @@ def benchmark_price_foreign_exchange_option(
             return {k: float(v) for k, v in res.items()}
         return {"price": float(res)}
 
-    if hasattr(params, "closed_form_option_price"):
+    if hasattr(model, "closed_form_option_price"):
         opt_str = (
             resolved.value
             if isinstance(resolved, OptionType)
             else str(resolved).lower()
         )
-        res_val = params.closed_form_option_price(
+        res_val = model.closed_form_option_price(
             strike=strike,
             maturity_yrs=maturity_yrs,
             option_type=opt_str,
@@ -839,33 +756,11 @@ def benchmark_price_foreign_exchange_option(
         )
         return {"price": float(res_val)}
 
-    if isinstance(params, (FXLGMParams, TwoCurrencyFXModel)):
-        if isinstance(params, FXLGMParams):
-            df_d = float(
-                _interpolate_discount_factor(
-                    maturity_yrs,
-                    params.domestic.discount_curve_yrs,
-                    params.domestic.discount_factors,
-                )
-            )
-            df_f = float(
-                _interpolate_discount_factor(
-                    maturity_yrs,
-                    params.foreign.discount_curve_yrs,
-                    params.foreign.discount_factors,
-                )
-            )
-            spot = float(params.spot_fx)
-            vol = float(params.fx_vol_ann)
-        else:
-            df_d = float(
-                params.domestic_ir_model.interpolate_discount_factor(maturity_yrs)
-            )
-            df_f = float(
-                params.foreign_ir_model.interpolate_discount_factor(maturity_yrs)
-            )
-            spot = float(params.spot_fx)
-            vol = float(params.fx_vol_ann)
+    if isinstance(model, TwoCurrencyFXModel):
+        df_d = float(model.domestic_ir_model.interpolate_discount_factor(maturity_yrs))
+        df_f = float(model.foreign_ir_model.interpolate_discount_factor(maturity_yrs))
+        spot = float(model.spot_fx)
+        vol = float(model.fx_vol_ann)
 
         fwd_fx = spot * (df_f / max(df_d, 1e-18))
         total_std = vol * np.sqrt(maturity_yrs)
@@ -895,7 +790,7 @@ def benchmark_price_foreign_exchange_option(
 
         return {"price": float(pv), "forward_fx": float(fwd_fx)}
 
-    msg = f"Analytical benchmark not supported for {type(params).__name__}"
+    msg = f"Analytical benchmark not supported for {type(model).__name__}"
     raise TypeError(msg)
 
 
@@ -915,7 +810,7 @@ def price_foreign_exchange_option(
     random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
     scramble: bool = True,
 ) -> dict[str, float | np.ndarray]:
-    r"""Price a European currency option via Monte Carlo under LGM or modular FX models.
+    r"""Price a European currency option via Monte Carlo under any modular FX model.
 
     Payoffs:
 
@@ -923,8 +818,8 @@ def price_foreign_exchange_option(
     - **Put**: :math:`N \times \max(K - S(T),\; 0)`
 
     Args:
-        params: Two-currency model parameters, either :class:`FXLGMParams` or
-            a modular :class:`~xvasim.models.base.FXModel`.
+        params: Foreign exchange model, either an instantiated
+            :class:`~xvasim.models.base.FXModel` or legacy :class:`FXLGMParams`.
         strike: Option strike (domestic per foreign).
         maturity_yrs: Expiry in years.
         notional: Notional in foreign currency.
@@ -967,9 +862,10 @@ def price_foreign_exchange_option(
         )
         raise TypeError(msg)
 
-    if isinstance(params, FXLGMParams):
-        times, x_dom, _x_for, fx_paths = _simulate_fx_paths(
-            params,
+    model = _resolve_fx_model(params)
+
+    if isinstance(model, TwoCurrencyFXModel):
+        times, x_dom, _x_for, fx_paths = model.simulate_paths(
             maturity_yrs,
             n_paths,
             n_steps,
@@ -978,10 +874,10 @@ def price_foreign_exchange_option(
             scramble=scramble,
         )
         s_t = fx_paths[:, -1]
-        dom_df = _discount_path(params.domestic, x_dom, times)
+        dom_df = model.domestic_ir_model.discount_path(times, x_dom)
         df_t = dom_df[:, -1]
-    elif isinstance(params, TwoCurrencyFXModel):
-        times, x_dom, _x_for, fx_paths = params.simulate_paths(
+    else:
+        sim_res = model.simulate_paths(
             maturity_yrs,
             n_paths,
             n_steps,
@@ -989,28 +885,13 @@ def price_foreign_exchange_option(
             seed=seed,
             scramble=scramble,
         )
+        fx_paths = sim_res[-1] if isinstance(sim_res, tuple) else sim_res
         s_t = fx_paths[:, -1]
-        dom_df = params.domestic_ir_model.discount_path(times, x_dom)
-        df_t = dom_df[:, -1]
-    elif isinstance(params, FXModel):
-        sim_res = params.simulate_paths(
-            maturity_yrs,
-            n_paths,
-            n_steps,
-            random_type=random_type,
-            seed=seed,
-            scramble=scramble,
-        )
-        fx_paths = sim_res[-1]
-        s_t = fx_paths[:, -1]
-        if hasattr(params, "domestic_discount_factor"):
-            df_val = float(params.domestic_discount_factor(maturity_yrs))
+        if hasattr(model, "domestic_discount_factor"):
+            df_val = float(model.domestic_discount_factor(maturity_yrs))
             df_t = np.full(n_paths, df_val, dtype=np.float64)
         else:
             df_t = np.ones(n_paths, dtype=np.float64)
-    else:
-        msg = f"params must be FXLGMParams or FXModel, got {type(params).__name__}"
-        raise TypeError(msg)
 
     if resolved is OptionType.CALL:
         intrinsic = np.maximum(s_t - strike, 0.0)
@@ -1526,20 +1407,6 @@ def _generate_swap_schedule(
         raise ValueError("Must provide either tenor_yrs or payment_times_yrs.")
 
 
-def _get_ir_model(model: InterestRateModel | LGMParams) -> InterestRateModel:
-    """Wrap legacy LGMParams in LGMModel if necessary."""
-    if isinstance(model, InterestRateModel):
-        return model
-    elif isinstance(model, LGMParams):
-        return LGMModel(model)
-    else:
-        msg = (
-            f"model must be an InterestRateModel or LGMParams, "
-            f"got {type(model).__name__}"
-        )
-        raise TypeError(msg)
-
-
 def benchmark_price_interest_rate_swap(
     model: InterestRateModel | LGMParams,
     fixed_rate_ann: float,
@@ -1552,9 +1419,11 @@ def benchmark_price_interest_rate_swap(
 ) -> dict[str, typing.Any]:
     r"""Analytical closed-form benchmark pricing for a single-currency IRS.
 
+    Evaluates the exact present value from the model's initial discount curve.
+
     Args:
         model: An instantiated :class:`~xvasim.models.base.InterestRateModel`
-            or :class:`~xvasim.models.ir.lgm.LGMParams`.
+            or legacy :class:`~xvasim.models.ir.lgm.LGMParams`.
         fixed_rate_ann: Annualised fixed coupon rate :math:`K` (e.g. 0.03 for 3%).
         tenor_yrs: Total swap tenor in years (used if *payment_times_yrs* is None).
         payment_times_yrs: Custom array or list of payment dates in years.
@@ -1599,7 +1468,7 @@ def price_interest_rate_swap(
     random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
     scramble: bool = True,
 ) -> dict[str, typing.Any]:
-    r"""Price a single-currency vanilla Interest Rate Swap (IRS).
+    r"""Price a single-currency vanilla Interest Rate Swap (IRS) under any IR model.
 
     A vanilla IRS exchanges fixed-rate coupon payments for floating-rate
     coupon payments (e.g. forward Ibor / Libor / SOFR) on a series of
@@ -1612,7 +1481,11 @@ def price_interest_rate_swap(
 
     Args:
         model: An instantiated :class:`~xvasim.models.base.InterestRateModel`
-            or :class:`~xvasim.models.ir.lgm.LGMParams`.
+            (such as :class:`~xvasim.models.ir.LGMModel`,
+            :class:`~xvasim.models.ir.HullWhite1FModel`,
+            :class:`~xvasim.models.ir.VasicekModel`,
+            :class:`~xvasim.models.ir.CIRInterestRateModel`)
+            or legacy :class:`~xvasim.models.ir.lgm.LGMParams`.
         fixed_rate_ann: Annualised fixed coupon rate :math:`K` (e.g. 0.03 for 3%).
         tenor_yrs: Total swap tenor in years (used if *payment_times_yrs* is None).
         payment_times_yrs: Custom array or list of payment dates in years.
@@ -1650,131 +1523,116 @@ def price_interest_rate_swap(
     t_ends = pay_times
     tau_vec = t_ends - t_starts
 
-    # Analytical values from discount curve
-    df_ends = np.array(
+    # Initial curve discount factors
+    p_ends = np.array(
         [float(ir_model.interpolate_discount_factor(t)) for t in t_ends],
         dtype=np.float64,
     )
-    df_starts = np.array(
+    p_starts = np.array(
         [float(ir_model.interpolate_discount_factor(t)) for t in t_starts],
         dtype=np.float64,
     )
 
-    annuity = float(np.sum(tau_vec * df_ends))
-    p_0 = float(df_starts[0])
-    p_n = float(df_ends[-1])
+    # Annuity A_0 = sum tau_i * P(0, T_i)
+    annuity = float(np.sum(tau_vec * p_ends))
 
-    # Fair swap rate S_0 = (P(0, T_0) - P(0, T_n)) / Annuity
-    fair_swap_rate = float((p_0 - p_n) / max(annuity, 1e-18))
+    # Analytical pricing:
+    # Floating leg PV (without spread) = P(0, T_0) - P(0, T_n) = 1.0 - P(0, T_n)
+    float_leg_pv_clean = float(p_starts[0] - p_ends[-1])
+    float_leg_pv_analytical = notional * (float_leg_pv_clean + spread_ann * annuity)
+    fixed_leg_pv_analytical = notional * fixed_rate_ann * annuity
 
-    fixed_leg_pv_analytical = float(notional * fixed_rate_ann * annuity)
-    floating_leg_pv_analytical = float(notional * ((p_0 - p_n) + spread_ann * annuity))
+    if is_payer:
+        price_analytical = float_leg_pv_analytical - fixed_leg_pv_analytical
+    else:
+        price_analytical = fixed_leg_pv_analytical - float_leg_pv_analytical
 
-    # Analytical period cash flows
-    period_cfs: list[dict[str, float]] = []
+    fair_swap_rate = float_leg_pv_clean / max(annuity, 1e-18)
+
+    period_cfs: list[dict[str, typing.Any]] = []
     for i in range(n_periods):
-        t_s = float(t_starts[i])
-        t_e = float(t_ends[i])
-        tau = float(tau_vec[i])
-        df_e = float(df_ends[i])
-        df_s = float(df_starts[i])
-
-        fwd_rate = float((df_s / max(df_e, 1e-18) - 1.0) / tau)
-        fixed_cf = notional * fixed_rate_ann * tau
-        float_cf = notional * (fwd_rate + spread_ann) * tau
-        net_cf = (float_cf - fixed_cf) if is_payer else (fixed_cf - float_cf)
-
+        fwd_rate = float((p_starts[i] / max(p_ends[i], 1e-18) - 1.0) / tau_vec[i])
         period_cfs.append(
             {
-                "start_time_yrs": t_s,
-                "end_time_yrs": t_e,
-                "year_fraction_yrs": tau,
-                "discount_factor": df_e,
-                "forward_rate_ann": fwd_rate,
-                "fixed_payment": fixed_cf,
-                "floating_payment": float_cf,
-                "net_payment": net_cf,
-                "discounted_net_pv": net_cf * df_e,
+                "period": i + 1,
+                "start_time_yrs": float(t_starts[i]),
+                "end_time_yrs": float(t_ends[i]),
+                "tau_yrs": float(tau_vec[i]),
+                "discount_factor": float(p_ends[i]),
+                "forward_rate": fwd_rate,
+                "fixed_cash_flow": float(notional * fixed_rate_ann * tau_vec[i]),
+                "expected_floating_cash_flow": float(
+                    notional * (fwd_rate + spread_ann) * tau_vec[i]
+                ),
             }
         )
 
-    price_analytical = (
-        floating_leg_pv_analytical - fixed_leg_pv_analytical
-        if is_payer
-        else fixed_leg_pv_analytical - floating_leg_pv_analytical
-    )
-
+    # Return pure analytical results if n_paths is None
     if n_paths is None:
-        # Closed-form pricing
         return {
             "price": price_analytical,
             "fixed_leg_pv": fixed_leg_pv_analytical,
-            "floating_leg_pv": floating_leg_pv_analytical,
+            "floating_leg_pv": float_leg_pv_analytical,
+            "analytical_benchmark_price": price_analytical,
             "fair_swap_rate": fair_swap_rate,
             "annuity": annuity,
             "period_cash_flows": period_cfs,
         }
 
-    # Monte Carlo simulation
-    grid_points: list[float] = [0.0]
-    for i in range(n_periods):
-        t_s = float(t_starts[i])
-        t_e = float(t_ends[i])
-        n_sub = max(1, int(np.ceil((t_e - t_s) * n_steps_per_year)))
-        sub_grid = np.linspace(t_s, t_e, n_sub + 1)
-        grid_points.extend(sub_grid[1:].tolist())
-
-    sim_times = np.array(
-        sorted(set(np.round(grid_points, decimals=8))), dtype=np.float64
-    )
-
-    idx_starts = [int(np.argmin(np.abs(sim_times - t))) for t in t_starts]
-    idx_ends = [int(np.argmin(np.abs(sim_times - t))) for t in t_ends]
+    # Monte Carlo pricing
+    maturity_yrs = float(t_ends[-1])
+    n_steps = max(int(np.ceil(maturity_yrs * n_steps_per_year)), len(pay_times) * 2)
+    sim_times = np.linspace(0.0, maturity_yrs, n_steps + 1)
 
     x_paths = ir_model.simulate_paths(
-        sim_times,
-        n_paths,
+        times=sim_times,
+        n_paths=n_paths,
         random_type=random_type,
         seed=seed,
         scramble=scramble,
     )
+
+    # Path-wise discount factors D(0, t_k)
     df_paths = ir_model.discount_path(sim_times, x_paths)
 
-    total_pv_paths = np.zeros(n_paths, dtype=np.float64)
-    fixed_pv_paths = np.zeros(n_paths, dtype=np.float64)
-    float_pv_paths = np.zeros(n_paths, dtype=np.float64)
+    time_indices_start = [
+        int(np.argmin(np.abs(sim_times - t))) for t in t_starts
+    ]
+    time_indices_end = [int(np.argmin(np.abs(sim_times - t))) for t in t_ends]
+
+    pv_fixed_paths = np.zeros(n_paths, dtype=np.float64)
+    pv_floating_paths = np.zeros(n_paths, dtype=np.float64)
 
     for i in range(n_periods):
         tau = float(tau_vec[i])
-        idx_s = idx_starts[i]
-        idx_e = idx_ends[i]
-        t_s = float(t_starts[i])
-        t_e = float(t_ends[i])
+        idx_start = time_indices_start[i]
+        idx_end = time_indices_end[i]
+        t_start = float(t_starts[i])
+        t_end = float(t_ends[i])
 
-        if t_s == 0.0:
-            df_init = float(ir_model.interpolate_discount_factor(t_e))
-            l_rates = np.full(n_paths, (1.0 / df_init - 1.0) / tau, dtype=np.float64)
+        if t_start == 0.0:
+            df_0_tend = float(ir_model.interpolate_discount_factor(t_end))
+            l_paths = np.full(n_paths, (1.0 / df_0_tend - 1.0) / tau, dtype=np.float64)
         else:
-            state_at_reset = x_paths[:, idx_s]
-            p_reset_end = ir_model.zero_coupon_bond(t_s, t_e, state_at_reset)
-            l_rates = (1.0 / np.maximum(p_reset_end, 1e-18) - 1.0) / tau
+            p_mat = ir_model.zero_coupon_bond(t_start, t_end, x_paths[:, idx_start])
+            l_paths = (1.0 / np.maximum(p_mat, 1e-18) - 1.0) / tau
 
         cf_fixed = notional * fixed_rate_ann * tau
-        cf_float = notional * (l_rates + spread_ann) * tau
-        df_at_pay = df_paths[:, idx_e]
+        cf_float = notional * (l_paths + spread_ann) * tau
 
-        fixed_pv_paths += cf_fixed * df_at_pay
-        float_pv_paths += cf_float * df_at_pay
+        df_pay = df_paths[:, idx_end]
+        pv_fixed_paths += cf_fixed * df_pay
+        pv_floating_paths += cf_float * df_pay
 
-        if is_payer:
-            total_pv_paths += (cf_float - cf_fixed) * df_at_pay
-        else:
-            total_pv_paths += (cf_fixed - cf_float) * df_at_pay
+    if is_payer:
+        pv_net_paths = pv_floating_paths - pv_fixed_paths
+    else:
+        pv_net_paths = pv_fixed_paths - pv_floating_paths
 
-    price_mc = float(np.mean(total_pv_paths))
-    std_error = float(np.std(total_pv_paths) / np.sqrt(n_paths))
-    fixed_leg_pv_mc = float(np.mean(fixed_pv_paths))
-    float_leg_pv_mc = float(np.mean(float_pv_paths))
+    price_mc = float(np.mean(pv_net_paths))
+    std_error = float(np.std(pv_net_paths) / np.sqrt(n_paths))
+    fixed_leg_pv_mc = float(np.mean(pv_fixed_paths))
+    float_leg_pv_mc = float(np.mean(pv_floating_paths))
 
     return {
         "price": price_mc,
@@ -1810,9 +1668,14 @@ def benchmark_price_cross_currency_swap(
 ) -> dict[str, typing.Any]:
     r"""Exact analytical closed-form benchmark pricing for Cross-Currency Swaps.
 
+    Evaluates the exact present value and fair rates/spreads from the underlying
+    domestic and foreign discount curves across any supported leg structure:
+    Fixed-for-Floating, Fixed-for-Fixed, or Floating-for-Floating (basis swap).
+
     Args:
         model: A :class:`~xvasim.models.fx.TwoCurrencyFXModel`, legacy
-            :class:`FXLGMParams`, or a modular :class:`~xvasim.models.base.FXModel`.
+            :class:`FXLGMParams`, or a modular :class:`~xvasim.models.base.FXModel`
+            with domestic and foreign interest rate models.
         domestic_rate_ann: Annualised fixed coupon on domestic leg (if fixed).
         foreign_rate_ann: Annualised fixed coupon on foreign leg (if fixed).
         domestic_spread_ann: Annualised spread on domestic floating rate (if floating).
@@ -1890,7 +1753,8 @@ def price_cross_currency_swap(
 
     Args:
         model: A :class:`~xvasim.models.fx.TwoCurrencyFXModel`, legacy
-            :class:`FXLGMParams`, or a modular :class:`~xvasim.models.base.FXModel`.
+            :class:`FXLGMParams`, or a modular :class:`~xvasim.models.base.FXModel`
+            with domestic and foreign interest rate models.
         domestic_rate_ann: Annualised fixed coupon on domestic leg (if fixed).
         foreign_rate_ann: Annualised fixed coupon on foreign leg (if fixed).
         domestic_spread_ann: Annualised spread on domestic floating rate (if floating).
@@ -1935,7 +1799,7 @@ def price_cross_currency_swap(
         - ``"analytical_benchmark_price"`` — Exact analytical benchmark price.
     """
     if isinstance(model, FXLGMParams):
-        fx_model = TwoCurrencyFXModel.from_lgm_params(
+        fx_model = TwoCurrencyFXModel.from_ir_models(
             domestic=model.domestic,
             foreign=model.foreign,
             spot_fx=model.spot_fx,
@@ -1944,7 +1808,11 @@ def price_cross_currency_swap(
         )
     elif isinstance(model, TwoCurrencyFXModel):
         fx_model = model
-    elif isinstance(model, FXModel) and hasattr(model, "domestic_ir_model"):
+    elif (
+        isinstance(model, FXModel)
+        and hasattr(model, "domestic_ir_model")
+        and hasattr(model, "foreign_ir_model")
+    ):
         fx_model = typing.cast(TwoCurrencyFXModel, model)
     else:
         msg = (

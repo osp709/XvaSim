@@ -208,6 +208,46 @@ class InterestRateModel(StochasticModel):
         """
         ...
 
+    def swaption_price_normal(
+        self,
+        expiry_yrs: float,
+        swap_tenor_yrs: float,
+        market_normal_vol_ann: float,
+        fixed_rate_ann: float,
+        pay_freq_yrs: float = 0.5,
+    ) -> tuple[float, float]:
+        """Compute model and market swaption prices under Bachelier's normal model.
+
+        Args:
+            expiry_yrs: Swaption expiry in years.
+            swap_tenor_yrs: Underlying swap tenor in years.
+            market_normal_vol_ann: Market normal volatility (annualised decimal).
+            fixed_rate_ann: Fixed rate of underlying swap (annualised decimal).
+            pay_freq_yrs: Payment frequency in years (default: 0.5).
+
+        Returns:
+            Tuple of ``(model_price, market_price)``.
+        """
+        msg = f"swaption_price_normal is not supported by {self.__class__.__name__}"
+        raise NotImplementedError(msg)
+
+    def analytical_swaption_price(
+        self,
+        expiry_yrs: float,
+        swap_tenor_yrs: float,
+        market_normal_vol_ann: float,
+        fixed_rate_ann: float,
+        pay_freq_yrs: float = 0.5,
+    ) -> tuple[float, float]:
+        """Alias for :meth:`swaption_price_normal`."""
+        return self.swaption_price_normal(
+            expiry_yrs=expiry_yrs,
+            swap_tenor_yrs=swap_tenor_yrs,
+            market_normal_vol_ann=market_normal_vol_ann,
+            fixed_rate_ann=fixed_rate_ann,
+            pay_freq_yrs=pay_freq_yrs,
+        )
+
 
 class CreditModel(StochasticModel):
     """Abstract base class for credit, hazard-rate, and default intensity models."""
@@ -216,6 +256,24 @@ class CreditModel(StochasticModel):
     def risk_factor_type(self) -> RiskFactorType:
         """Returns :attr:`RiskFactorType.CREDIT`."""
         return RiskFactorType.CREDIT
+
+    @classmethod
+    def calibrate_from_spreads(
+        cls,
+        credit_spreads_ann: np.ndarray,
+        tenors_yrs: np.ndarray,
+    ) -> CreditModel:
+        """Calibrate model parameters to market credit spreads.
+
+        Args:
+            credit_spreads_ann: 1-D array of market credit spreads (annualised).
+            tenors_yrs: 1-D array of tenors in years.
+
+        Returns:
+            Calibrated :class:`CreditModel` instance.
+        """
+        msg = f"calibrate_from_spreads is not implemented for {cls.__name__}"
+        raise NotImplementedError(msg)
 
     @abc.abstractmethod
     def survival_probability(self, tenors_yrs: np.ndarray) -> np.ndarray:

@@ -1,14 +1,14 @@
-"""CIR-based credit model calibration and CVA computation engine.
+"""Modular credit model calibration and CVA computation engine.
 
-This module implements the **Cox-Ingersoll-Ross (CIR)** hazard-rate model
-for computing survival probabilities and Credit Valuation Adjustment (CVA).
-The CIR model parameters are calibrated to observed market credit spreads,
-and the resulting survival curve drives marginal default-probability
-estimation for path-wise CVA aggregation.
+This module implements Credit Valuation Adjustment (CVA) aggregation and credit
+spread calibration. It supports pluggable credit / hazard-rate models
+(:class:`~xvasim.models.base.CreditModel`, such as
+:class:`~xvasim.models.credit.CIRHazardRateModel`) and provides path-wise Monte
+Carlo CVA calculation with memory chunking and Numexpr acceleration.
 
 Public API
 ----------
-- :class:`CIRParams` — calibrated CIR model parameters.
+- :class:`CIRParams` — calibrated CIR model parameters (re-exported).
 - :func:`compute_cva` — path-wise CVA aggregation with numexpr and chunking.
 - :func:`compute_cva_chunked` — generator/iterable streaming CVA aggregation.
 - :func:`compute_marginal_pd` — marginal default probabilities from spreads.
@@ -24,11 +24,9 @@ from __future__ import annotations
 import typing
 
 import numpy as np
-from scipy.optimize import minimize
 
-from .jit import cir_calibration_objective_kernel, cir_survival_probability_kernel
 from .models.base import CreditModel
-from .models.credit.cir import CIRParams
+from .models.credit.cir import CIRHazardRateModel, CIRParams
 
 try:
     import numexpr as _ne  # type: ignore[import-not-found]
@@ -47,59 +45,40 @@ __all__ = [
 
 
 # ---------------------------------------------------------------------------
-# Survival probability
+# Credit model survival probability & Calibration helpers
 # ---------------------------------------------------------------------------
 
 
-def _cir_survival_probability(
+def _credit_model_survival_probability(
     tenors_yrs: np.ndarray,
-    params: CIRParams,
+    params: CIRParams | CreditModel,
 ) -> np.ndarray:
-    r"""Compute survival probabilities using the CIR closed-form solution.
+    r"""Compute survival probabilities using a CreditModel or CIRParams instance.
 
     .. math::
         P_{\text{surv}}(0, t) = A(t)\,e^{-B(t)\,\lambda_{0,\text{ann}}}
 
-    where :math:`\gamma = \sqrt{\kappa_{\text{ann}}^2
-    + 2\,\sigma_{\text{ann}}^2}` and:
-
-    .. math::
-        A(t) = \left[\frac{2\gamma\,e^{(\kappa_{\text{ann}}+\gamma)\,t/2}}
-        {(\kappa_{\text{ann}}+\gamma)(e^{\gamma t}-1)+2\gamma}
-        \right]^{\frac{2\kappa_{\text{ann}}\theta_{\text{ann}}}
-        {\sigma_{\text{ann}}^2}}
-
-    .. math::
-        B(t) = \frac{2(e^{\gamma t}-1)}
-        {(\kappa_{\text{ann}}+\gamma)(e^{\gamma t}-1)+2\gamma}
-
     Args:
         tenors_yrs: 1-D array of time points (in years).
-        params: Calibrated :class:`CIRParams` instance.
+        params: Calibrated :class:`CreditModel` or :class:`CIRParams` instance.
 
     Returns:
         1-D array of survival probabilities at each tenor.
     """
-    tenors_arr = np.asarray(tenors_yrs, dtype=np.float64)
-    return cir_survival_probability_kernel(
-        tenors_arr,
-        params.kappa_ann,
-        params.theta_ann,
-        params.sigma_ann,
-        params.lambda_0_ann,
-    )
+    if isinstance(params, CreditModel):
+        return params.survival_probability(tenors_yrs)
+    return CIRHazardRateModel(params).survival_probability(tenors_yrs)
 
 
-# ---------------------------------------------------------------------------
-# Calibration
-# ---------------------------------------------------------------------------
+_cir_survival_probability = _credit_model_survival_probability
 
 
-def _calibrate_cir(
+def _calibrate_credit_model(
     credit_spreads_ann: np.ndarray,
     tenors_yrs: np.ndarray,
+    model_type: str = "cir",
 ) -> CIRParams:
-    r"""Calibrate CIR model parameters to market credit spreads.
+    r"""Calibrate a credit model to market credit spreads.
 
     Minimises the sum of squared errors between model-implied credit
     spreads and the observed market credit spreads using **L-BFGS-B**:
@@ -119,50 +98,29 @@ def _calibrate_cir(
             tenor (annualised decimals, e.g. 0.02 for 2.0 % p.a.).
         tenors_yrs: 1-D array of time points (years) corresponding to
             the credit spreads.
+        model_type: Category of credit model to calibrate (default: ``"cir"``).
 
     Returns:
-        A :class:`CIRParams` instance with calibrated parameters.
+        A calibrated model parameters instance (e.g. :class:`CIRParams`).
 
     Raises:
+        ValueError: If an unsupported *model_type* is specified.
         RuntimeError: If the optimisation fails to converge.
     """
-    spreads = np.asarray(credit_spreads_ann, dtype=np.float64)
-    tenors = np.asarray(tenors_yrs, dtype=np.float64)
-
-    if (
-        len(spreads) == 0
-        or len(tenors) == 0
-        or np.isnan(spreads).any()
-        or np.isnan(tenors).any()
-    ):
+    model_key = model_type.strip().lower()
+    if model_key not in ("cir", "cox_ingersoll_ross"):
         msg = (
-            "CIR calibration failed: input spreads or tenors contain NaN "
-            "or are empty"
+            f"Credit calibration currently supports 'cir', "
+            f"got model_type='{model_type}'"
         )
-        raise RuntimeError(msg)
+        raise ValueError(msg)
 
-    def objective(params_vec: np.ndarray) -> float:
-        return cir_calibration_objective_kernel(params_vec, tenors, spreads)
+    return CIRHazardRateModel.calibrate_from_spreads(
+        credit_spreads_ann, tenors_yrs
+    ).params
 
-    x0 = [
-        0.1,
-        float(np.mean(spreads)),
-        0.05,
-        float(spreads[0]),
-    ]
-    bounds = [
-        (1e-4, 5.0),
-        (1e-4, 2.0),
-        (1e-4, 1.0),
-        (1e-4, 2.0),
-    ]
 
-    result = minimize(objective, x0, bounds=bounds, method="L-BFGS-B")
-    if not result.success or np.isnan(result.x).any():
-        msg = f"CIR calibration failed: {result.message}"
-        raise RuntimeError(msg)
-
-    return CIRParams(*result.x)
+_calibrate_cir = _calibrate_credit_model
 
 
 # ---------------------------------------------------------------------------
@@ -201,11 +159,10 @@ def compute_marginal_pd(
     if model is not None:
         return model.marginal_pd(tenors_yrs)
 
-    params = _calibrate_cir(credit_spreads_ann, tenors_yrs)
-    survival_probability = _cir_survival_probability(tenors_yrs, params)
-    cumulative_pd = 1.0 - survival_probability
-    marginal_pd = np.diff(cumulative_pd, prepend=0.0)
-    return marginal_pd
+    credit_model = CIRHazardRateModel.calibrate_from_spreads(
+        credit_spreads_ann, tenors_yrs
+    )
+    return credit_model.marginal_pd(tenors_yrs)
 
 
 def compute_cva(

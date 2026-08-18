@@ -8,15 +8,18 @@ with ``fastmath=True``) for:
 
 Public API
 ----------
-- :func:`cir_calibration_objective_kernel` — compiled CIR calibration objective.
-- :func:`cir_simulate_paths_kernel` — compiled CIR short rate path stepping.
-- :func:`cir_survival_probability_kernel` — compiled CIR survival probabilities.
+- :func:`simulate_model_paths_kernel` — generic model path simulation dispatcher.
+- :func:`credit_calibration_objective_kernel` — credit calibration objective kernel.
+- :func:`credit_survival_probability_kernel` — credit survival probability kernel.
 - :func:`discount_path_kernel` — compiled cumulative discount factor calculation.
-- :func:`heston_simulate_paths_kernel` — compiled Full Truncation Heston stepping.
-- :func:`hull_white_simulate_paths_kernel` — compiled Hull-White 1F path stepping.
 - :func:`is_numba_available` — check whether Numba JIT is active.
-- :func:`lgm_simulate_paths_kernel` — compiled LGM state path stepping.
-- :func:`vasicek_simulate_paths_kernel` — compiled Vasicek short rate path stepping.
+- :func:`cir_calibration_objective_kernel` — (alias) CIR calibration objective.
+- :func:`cir_simulate_paths_kernel` — (alias) CIR short rate path stepping.
+- :func:`cir_survival_probability_kernel` — (alias) CIR survival probabilities.
+- :func:`heston_simulate_paths_kernel` — (alias) Full Truncation Heston stepping.
+- :func:`hull_white_simulate_paths_kernel` — (alias) Hull-White 1F path stepping.
+- :func:`lgm_simulate_paths_kernel` — (alias) LGM state path stepping.
+- :func:`vasicek_simulate_paths_kernel` — (alias) Vasicek short rate path stepping.
 """
 
 from __future__ import annotations
@@ -29,11 +32,14 @@ __all__ = [
     "cir_calibration_objective_kernel",
     "cir_simulate_paths_kernel",
     "cir_survival_probability_kernel",
+    "credit_calibration_objective_kernel",
+    "credit_survival_probability_kernel",
     "discount_path_kernel",
     "heston_simulate_paths_kernel",
     "hull_white_simulate_paths_kernel",
     "is_numba_available",
     "lgm_simulate_paths_kernel",
+    "simulate_model_paths_kernel",
     "vasicek_simulate_paths_kernel",
 ]
 
@@ -64,12 +70,12 @@ def is_numba_available() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# JIT-compiled kernels
+# JIT-compiled kernels (Private implementations)
 # ---------------------------------------------------------------------------
 
 
 @njit_safe
-def cir_survival_probability_kernel(
+def _cir_survival_probability_kernel(
     tenors_yrs: np.ndarray,
     kappa: float,
     theta: float,
@@ -118,7 +124,7 @@ def cir_survival_probability_kernel(
 
 
 @njit_safe
-def cir_calibration_objective_kernel(
+def _cir_calibration_objective_kernel(
     params_vec: np.ndarray,
     tenors_yrs: np.ndarray,
     credit_spreads_ann: np.ndarray,
@@ -141,7 +147,7 @@ def cir_calibration_objective_kernel(
     if kappa <= 0.0 or theta <= 0.0 or sigma <= 0.0 or lam0 < 0.0:
         return 1e12
 
-    surv_prob = cir_survival_probability_kernel(
+    surv_prob = _cir_survival_probability_kernel(
         tenors_yrs, kappa, theta, sigma, lam0
     )
     n = len(tenors_yrs)
@@ -160,7 +166,7 @@ def cir_calibration_objective_kernel(
 
 
 @njit
-def cir_simulate_paths_kernel(
+def _cir_simulate_paths_kernel(
     n_paths: int,
     n_steps: int,
     dt_vec: np.ndarray,
@@ -202,7 +208,7 @@ def cir_simulate_paths_kernel(
 
 
 @njit
-def lgm_simulate_paths_kernel(
+def _lgm_simulate_paths_kernel(
     n_paths: int,
     n_steps: int,
     dt_vec: np.ndarray,
@@ -238,7 +244,7 @@ def lgm_simulate_paths_kernel(
 
 
 @njit
-def vasicek_simulate_paths_kernel(
+def _vasicek_simulate_paths_kernel(
     n_paths: int,
     n_steps: int,
     dt_vec: np.ndarray,
@@ -278,7 +284,7 @@ def vasicek_simulate_paths_kernel(
 
 
 @njit
-def hull_white_simulate_paths_kernel(
+def _hull_white_simulate_paths_kernel(
     n_paths: int,
     n_steps: int,
     dt_vec: np.ndarray,
@@ -319,7 +325,7 @@ def hull_white_simulate_paths_kernel(
 
 
 @njit
-def heston_simulate_paths_kernel(
+def _heston_simulate_paths_kernel(
     n_paths: int,
     n_steps: int,
     dt: float,
@@ -389,12 +395,14 @@ def heston_simulate_paths_kernel(
             drift_s = (r_d - r_f) - 0.5 * v_pos
             ln_fx[p, step + 1] = ln_fx[p, step] + drift_s * dt + sqrt_v_pos * dw_s
 
+            v_paths[p, step + 1] = v_next
+
     fx_spot = np.exp(ln_fx)
     return v_paths, fx_spot
 
 
 @njit
-def discount_path_kernel(
+def _discount_path_kernel(
     times: np.ndarray,
     short_rates: np.ndarray,
 ) -> np.ndarray:
@@ -423,3 +431,58 @@ def discount_path_kernel(
             dfs[p, j] = np.exp(-cum_integral[p])
 
     return dfs
+
+
+# ---------------------------------------------------------------------------
+# Generic Public Dispatchers & Compatibility Aliases
+# ---------------------------------------------------------------------------
+
+discount_path_kernel = _discount_path_kernel
+
+credit_survival_probability_kernel = _cir_survival_probability_kernel
+cir_survival_probability_kernel = _cir_survival_probability_kernel
+
+credit_calibration_objective_kernel = _cir_calibration_objective_kernel
+cir_calibration_objective_kernel = _cir_calibration_objective_kernel
+
+cir_simulate_paths_kernel = _cir_simulate_paths_kernel
+lgm_simulate_paths_kernel = _lgm_simulate_paths_kernel
+vasicek_simulate_paths_kernel = _vasicek_simulate_paths_kernel
+hull_white_simulate_paths_kernel = _hull_white_simulate_paths_kernel
+heston_simulate_paths_kernel = _heston_simulate_paths_kernel
+
+
+def simulate_model_paths_kernel(
+    model_type: str,
+    *args: typing.Any,
+    **kwargs: typing.Any,
+) -> typing.Any:
+    """Generic dispatcher for JIT-compiled model simulation stepping kernels.
+
+    Args:
+        model_type: Risk factor model category (e.g. ``"cir"``, ``"lgm"``,
+            ``"vasicek"``, ``"hull_white"``, ``"heston"``).
+        *args: Positional arguments forwarded to the specific kernel.
+        **kwargs: Keyword arguments forwarded to the specific kernel.
+
+    Returns:
+        Simulated path array or tuple of path arrays.
+
+    Raises:
+        ValueError: If unsupported *model_type* is provided.
+    """
+    key = model_type.strip().lower()
+    if key in ("cir", "cox_ingersoll_ross"):
+        return _cir_simulate_paths_kernel(*args, **kwargs)
+    elif key in ("lgm", "linear_gauss_markov"):
+        return _lgm_simulate_paths_kernel(*args, **kwargs)
+    elif key in ("vasicek",):
+        return _vasicek_simulate_paths_kernel(*args, **kwargs)
+    elif key in ("hull_white", "hw1f", "hull_white_1f"):
+        return _hull_white_simulate_paths_kernel(*args, **kwargs)
+    elif key in ("heston",):
+        return _heston_simulate_paths_kernel(*args, **kwargs)
+    else:
+        msg = f"No simulation kernel registered for model_type='{model_type}'"
+        raise ValueError(msg)
+

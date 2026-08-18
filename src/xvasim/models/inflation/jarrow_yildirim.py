@@ -108,8 +108,8 @@ class JarrowYildirimModel(InflationModel):
 
     def __init__(
         self,
-        nominal_ir_model: InterestRateModel,
-        real_ir_model: InterestRateModel,
+        nominal_ir_model: InterestRateModel | LGMParams,
+        real_ir_model: InterestRateModel | LGMParams,
         base_cpi: float = 100.0,
         cpi_vol_ann: float = 0.02,
         correlation_matrix: np.ndarray | None = None,
@@ -131,8 +131,16 @@ class JarrowYildirimModel(InflationModel):
             msg = f"cpi_vol_ann must be non-negative, got {cpi_vol_ann}"
             raise ValueError(msg)
 
-        self._nominal_ir = nominal_ir_model
-        self._real_ir = real_ir_model
+        if isinstance(nominal_ir_model, LGMParams):
+            self._nominal_ir: InterestRateModel = LGMModel(params=nominal_ir_model)
+        else:
+            self._nominal_ir = nominal_ir_model
+
+        if isinstance(real_ir_model, LGMParams):
+            self._real_ir: InterestRateModel = LGMModel(params=real_ir_model)
+        else:
+            self._real_ir = real_ir_model
+
         self._base_cpi = float(base_cpi)
         self._cpi_vol_ann = float(cpi_vol_ann)
 
@@ -178,6 +186,39 @@ class JarrowYildirimModel(InflationModel):
         return self._correlation_matrix
 
     @classmethod
+    def from_ir_models(
+        cls,
+        nominal: InterestRateModel | LGMParams,
+        real: InterestRateModel | LGMParams,
+        base_cpi: float = 100.0,
+        cpi_vol_ann: float = 0.02,
+        correlation_matrix: np.ndarray | None = None,
+    ) -> JarrowYildirimModel:
+        """Construct JarrowYildirimModel from IR models or LGMParams instances.
+
+        Args:
+            nominal: Nominal interest rate model or :class:`LGMParams`.
+            real: Real interest rate model or :class:`LGMParams`.
+            base_cpi: Base Consumer Price Index level I(0).
+            cpi_vol_ann: Annualised CPI volatility.
+            correlation_matrix: 3x3 correlation matrix.
+
+        Returns:
+            A new :class:`JarrowYildirimModel` instance.
+        """
+        nom_model = LGMModel(nominal) if isinstance(nominal, LGMParams) else nominal
+        real_model = LGMModel(real) if isinstance(real, LGMParams) else real
+        return cls(
+            nominal_ir_model=nom_model,
+            real_ir_model=real_model,
+            base_cpi=base_cpi,
+            cpi_vol_ann=cpi_vol_ann,
+            correlation_matrix=correlation_matrix,
+        )
+
+    from_components = from_ir_models
+
+    @classmethod
     def from_lgm_params(
         cls,
         nominal: LGMParams,
@@ -187,9 +228,9 @@ class JarrowYildirimModel(InflationModel):
         correlation_matrix: np.ndarray | None = None,
     ) -> JarrowYildirimModel:
         """Construct a JarrowYildirimModel from nominal and real LGMParams instances."""
-        return cls(
-            nominal_ir_model=LGMModel(nominal),
-            real_ir_model=LGMModel(real),
+        return cls.from_ir_models(
+            nominal=nominal,
+            real=real,
             base_cpi=base_cpi,
             cpi_vol_ann=cpi_vol_ann,
             correlation_matrix=correlation_matrix,

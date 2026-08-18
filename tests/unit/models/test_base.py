@@ -129,6 +129,12 @@ class TestBaseClasses(unittest.TestCase):
         fwd = mdl.instantaneous_forward(1.0)
         self.assertGreater(fwd, 0.0)
 
+        with self.assertRaises(NotImplementedError):
+            mdl.swaption_price_normal(1.0, 5.0, 0.008, 0.03)
+
+        with self.assertRaises(NotImplementedError):
+            mdl.analytical_swaption_price(1.0, 5.0, 0.008, 0.03)
+
     def test_credit_model_base_methods(self) -> None:
         """Verify CreditModel marginal_pd default calculation from survival probabilities."""
         mdl = DummyCreditModel()
@@ -141,6 +147,9 @@ class TestBaseClasses(unittest.TestCase):
         self.assertAlmostEqual(
             float(np.sum(mpd)), float(1.0 - np.exp(-0.02 * 3.0)), places=10
         )
+
+        with self.assertRaises(NotImplementedError):
+            DummyCreditModel.calibrate_from_spreads(np.array([0.02]), np.array([1.0]))
 
     def test_fx_and_inflation_base_types(self) -> None:
         """Verify FXModel and InflationModel risk_factor_type properties."""

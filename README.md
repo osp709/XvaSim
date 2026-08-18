@@ -637,6 +637,44 @@ streamed_cva = compute_cva_chunked(
 print(f"Streaming Portfolio CVA: ${streamed_cva:,.2f}")
 ```
 
+### 9. Model-Agnostic Calibration & Decoupled Multi-Factor Models
+
+```python
+import numpy as np
+from xvasim import (
+    HullWhite1FModel,
+    LGMModel,
+    TwoCurrencyFXModel,
+    calibrate_ir_model_to_swaptions,
+)
+
+tenors_yrs = np.array([0.0, 1.0, 2.0, 5.0, 10.0])
+dfs = np.exp(-0.03 * tenors_yrs)
+
+# 1. Model-agnostic interest rate calibration to ATM swaption normal volatilities
+calibrated_params = calibrate_ir_model_to_swaptions(
+    swaption_expiries_yrs=np.array([1.0, 2.0, 5.0]),
+    swap_tenors_yrs=np.array([5.0, 5.0, 5.0]),
+    market_normal_vols_ann=np.array([0.0080, 0.0085, 0.0090]),
+    curve_yrs=tenors_yrs,
+    curve_dfs=dfs,
+    fixed_rates_ann=np.array([0.03, 0.03, 0.03]),
+    kappa_ann=0.03,
+    model_type="lgm",
+)
+lgm_model = LGMModel(calibrated_params)
+
+# 2. Decoupled multi-factor FX model using arbitrary interest rate components
+foreign_hw = HullWhite1FModel(a_ann=0.02, sigma_ann=0.008, discount_curve_yrs=tenors_yrs, discount_factors=dfs)
+fx_model = TwoCurrencyFXModel.from_components(
+    domestic=lgm_model,
+    foreign=foreign_hw,
+    spot_fx=1.25,
+    fx_vol_ann=0.11,
+    correlation_matrix=np.eye(3),
+)
+```
+
 ---
 
 ## 🧪 Testing & Verification Commands

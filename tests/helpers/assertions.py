@@ -105,3 +105,69 @@ def assert_no_arbitrage_bounds(
     if price > upper_bound + tolerance:
         msg = f"Price {price:.6f} violates upper bound {upper_bound:.6f}"
         raise AssertionError(msg)
+
+
+def assert_path_convergence(
+    path_counts: list[int] | tuple[int, ...] | np.ndarray,
+    std_errors: list[float] | tuple[float, ...] | np.ndarray,
+    prices: list[float] | tuple[float, ...] | np.ndarray | None = None,
+    benchmark_price: float | None = None,
+    min_decay_rate: float = 0.35,
+    num_std: float = 3.5,
+) -> None:
+    """Assert that standard errors decay and prices converge as path counts increase.
+
+    Parameters
+    ----------
+    path_counts : array-like of int
+        List or array of increasing path counts (e.g. [128, 512, 2048, 8192]).
+    std_errors : array-like of float
+        Standard errors corresponding to each path count.
+    prices : array-like of float, optional
+        Estimated Monte Carlo prices for each path count.
+    benchmark_price : float, optional
+        Exact closed-form benchmark price if available.
+    min_decay_rate : float
+        Minimum empirical standard error decay rate alpha in SE ~ N^(-alpha).
+        Standard Monte Carlo exhibits alpha ~ 0.5; we verify alpha >= min_decay_rate (default 0.35).
+    num_std : float
+        Statistical confidence multiplier for error bounds (default 3.5 = ~99.95%).
+    """
+    n_arr = np.asarray(path_counts, dtype=np.float64)
+    se_arr = np.asarray(std_errors, dtype=np.float64)
+
+    if len(n_arr) < 2:
+        raise ValueError("At least two path counts are required to test convergence.")
+
+    if not np.all(np.diff(n_arr) > 0):
+        raise ValueError("Path counts must be strictly increasing.")
+
+    if se_arr[-1] >= se_arr[0]:
+        raise AssertionError(
+            f"Standard error failed to reduce from initial N={int(n_arr[0])} (SE={se_arr[0]:.6e}) "
+            f"to final N={int(n_arr[-1])} (SE={se_arr[-1]:.6e})"
+        )
+
+    valid_mask = se_arr > 1e-15
+    if int(np.sum(valid_mask)) >= 2:
+        log_n = np.log(n_arr[valid_mask])
+        log_se = np.log(se_arr[valid_mask])
+        poly_res = np.polyfit(log_n, log_se, 1)
+        slope = float(poly_res[0])
+        decay_rate = -slope
+        if decay_rate < min_decay_rate:
+            raise AssertionError(
+                f"Standard error decay rate {decay_rate:.4f} is below threshold {min_decay_rate:.4f} "
+                f"(expected approx 0.5 for MC / >= 0.5 for QMC)"
+            )
+
+    if prices is not None and benchmark_price is not None:
+        p_arr = np.asarray(prices, dtype=np.float64)
+        for i in range(len(p_arr)):
+            assert_mc_within_bounds(
+                float(p_arr[i]),
+                float(se_arr[i]),
+                float(benchmark_price),
+                num_std=num_std,
+            )
+

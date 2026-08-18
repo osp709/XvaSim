@@ -26,8 +26,8 @@ class TwoCurrencyFXModel(FXModel):
 
     def __init__(
         self,
-        domestic_ir_model: InterestRateModel,
-        foreign_ir_model: InterestRateModel,
+        domestic_ir_model: InterestRateModel | LGMParams,
+        foreign_ir_model: InterestRateModel | LGMParams,
         spot_fx: float,
         fx_vol_ann: float,
         correlation_matrix: np.ndarray,
@@ -42,8 +42,16 @@ class TwoCurrencyFXModel(FXModel):
             correlation_matrix: 3×3 correlation matrix ordered as
                 ``[domestic_rate, foreign_rate, fx_spot]``.
         """
-        self._domestic = domestic_ir_model
-        self._foreign = foreign_ir_model
+        if isinstance(domestic_ir_model, LGMParams):
+            self._domestic: InterestRateModel = LGMModel(params=domestic_ir_model)
+        else:
+            self._domestic = domestic_ir_model
+
+        if isinstance(foreign_ir_model, LGMParams):
+            self._foreign: InterestRateModel = LGMModel(params=foreign_ir_model)
+        else:
+            self._foreign = foreign_ir_model
+
         self._spot_fx = float(spot_fx)
         self._fx_vol_ann = float(fx_vol_ann)
         self._correlation_matrix = np.asarray(correlation_matrix, dtype=np.float64)
@@ -85,6 +93,39 @@ class TwoCurrencyFXModel(FXModel):
         return self._correlation_matrix
 
     @classmethod
+    def from_ir_models(
+        cls,
+        domestic: InterestRateModel | LGMParams,
+        foreign: InterestRateModel | LGMParams,
+        spot_fx: float,
+        fx_vol_ann: float,
+        correlation_matrix: np.ndarray,
+    ) -> TwoCurrencyFXModel:
+        """Construct TwoCurrencyFXModel from model or LGMParams instances.
+
+        Args:
+            domestic: Domestic interest rate model or :class:`LGMParams`.
+            foreign: Foreign interest rate model or :class:`LGMParams`.
+            spot_fx: Current spot FX rate.
+            fx_vol_ann: Annualised FX volatility.
+            correlation_matrix: 3x3 correlation matrix.
+
+        Returns:
+            A new :class:`TwoCurrencyFXModel` instance.
+        """
+        dom_model = LGMModel(domestic) if isinstance(domestic, LGMParams) else domestic
+        for_model = LGMModel(foreign) if isinstance(foreign, LGMParams) else foreign
+        return cls(
+            domestic_ir_model=dom_model,
+            foreign_ir_model=for_model,
+            spot_fx=spot_fx,
+            fx_vol_ann=fx_vol_ann,
+            correlation_matrix=correlation_matrix,
+        )
+
+    from_components = from_ir_models
+
+    @classmethod
     def from_lgm_params(
         cls,
         domestic: LGMParams,
@@ -94,9 +135,9 @@ class TwoCurrencyFXModel(FXModel):
         correlation_matrix: np.ndarray,
     ) -> TwoCurrencyFXModel:
         """Construct a TwoCurrencyFXModel from LGMParams instances."""
-        return cls(
-            domestic_ir_model=LGMModel(domestic),
-            foreign_ir_model=LGMModel(foreign),
+        return cls.from_ir_models(
+            domestic=domestic,
+            foreign=foreign,
             spot_fx=spot_fx,
             fx_vol_ann=fx_vol_ann,
             correlation_matrix=correlation_matrix,

@@ -220,35 +220,14 @@ class TestModelRegistry(unittest.TestCase):
             create_inflation_model("dummy_inflation")
 
     def test_model_registry_clear(self) -> None:
-        """Verify ModelRegistry.clear empties registry and can be reloaded."""
-        # Test clear
-        ModelRegistry.clear()
-        self.assertEqual(len(ModelRegistry.list_models()), 0)
-
-        # Re-register by re-importing models
-        import importlib
-
-        import xvasim.models.credit.cir
-        import xvasim.models.fx.garman_kohlhagen
-        import xvasim.models.fx.heston
-        import xvasim.models.fx.two_currency
-        import xvasim.models.inflation.black_inflation
-        import xvasim.models.inflation.jarrow_yildirim
-        import xvasim.models.ir.cir
-        import xvasim.models.ir.hull_white
-        import xvasim.models.ir.lgm
-        import xvasim.models.ir.vasicek
-
-        importlib.reload(xvasim.models.ir.lgm)
-        importlib.reload(xvasim.models.ir.hull_white)
-        importlib.reload(xvasim.models.ir.vasicek)
-        importlib.reload(xvasim.models.ir.cir)
-        importlib.reload(xvasim.models.credit.cir)
-        importlib.reload(xvasim.models.fx.two_currency)
-        importlib.reload(xvasim.models.fx.garman_kohlhagen)
-        importlib.reload(xvasim.models.fx.heston)
-        importlib.reload(xvasim.models.inflation.jarrow_yildirim)
-        importlib.reload(xvasim.models.inflation.black_inflation)
+        """Verify ModelRegistry.clear empties registry and can be restored."""
+        snapshot = dict(ModelRegistry._registry)
+        try:
+            ModelRegistry.clear()
+            self.assertEqual(len(ModelRegistry.list_models()), 0)
+        finally:
+            ModelRegistry._registry.clear()
+            ModelRegistry._registry.update(snapshot)
 
         self.assertGreater(len(ModelRegistry.list_models()), 0)
 

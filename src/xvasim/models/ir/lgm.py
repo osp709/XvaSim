@@ -270,6 +270,58 @@ class LGMModel(InterestRateModel):
             dw_matrix=dw_matrix,
         )
 
+    def swaption_price_normal(
+        self,
+        expiry_yrs: float,
+        swap_tenor_yrs: float,
+        market_normal_vol_ann: float,
+        fixed_rate_ann: float,
+        pay_freq_yrs: float = 0.5,
+    ) -> tuple[float, float]:
+        """Compute the LGM model swaption price and market swaption price.
+
+        Both are expressed as *normal (Bachelier)* prices.
+
+        Args:
+            expiry_yrs: Swaption expiry in years.
+            swap_tenor_yrs: Underlying swap tenor in years.
+            market_normal_vol_ann: Market normal (Bachelier) volatility (annualised).
+            fixed_rate_ann: Fixed rate of underlying swap (annualised).
+            pay_freq_yrs: Payment frequency of fixed leg in years (default 0.5).
+
+        Returns:
+            Tuple of ``(model_price, market_price)``.
+        """
+        return _lgm_swaption_price_normal_helper(
+            expiry_yrs=expiry_yrs,
+            swap_tenor_yrs=swap_tenor_yrs,
+            market_normal_vol_ann=market_normal_vol_ann,
+            kappa=self.kappa_ann,
+            sigma_grid_yrs=self._params.sigma_grid_yrs,
+            sigma_values_ann=self._params.sigma_values_ann,
+            curve_yrs=self.discount_curve_yrs,
+            curve_dfs=self.discount_factors,
+            fixed_rate_ann=fixed_rate_ann,
+            pay_freq_yrs=pay_freq_yrs,
+        )
+
+    def analytical_swaption_price(
+        self,
+        expiry_yrs: float,
+        swap_tenor_yrs: float,
+        market_normal_vol_ann: float,
+        fixed_rate_ann: float,
+        pay_freq_yrs: float = 0.5,
+    ) -> tuple[float, float]:
+        """Alias for :meth:`swaption_price_normal`."""
+        return self.swaption_price_normal(
+            expiry_yrs=expiry_yrs,
+            swap_tenor_yrs=swap_tenor_yrs,
+            market_normal_vol_ann=market_normal_vol_ann,
+            fixed_rate_ann=fixed_rate_ann,
+            pay_freq_yrs=pay_freq_yrs,
+        )
+
     @classmethod
     def calibrate_to_swaptions(
         cls,

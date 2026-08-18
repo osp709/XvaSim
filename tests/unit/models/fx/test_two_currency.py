@@ -67,7 +67,7 @@ class TestTwoCurrencyFXModel(unittest.TestCase):
             )
 
     def test_from_lgm_params(self) -> None:
-        """Verify factory constructor from LGMParams."""
+        """Verify factory constructor from LGMParams and from_ir_models."""
         dom_p = LGMParams(
             kappa_ann=0.03,
             sigma_grid_yrs=np.array([5.0]),
@@ -91,6 +91,28 @@ class TestTwoCurrencyFXModel(unittest.TestCase):
         )
         self.assertIsInstance(mdl.domestic_ir_model, LGMModel)
         self.assertIsInstance(mdl.foreign_ir_model, LGMModel)
+
+        # from_ir_models with LGMParams
+        mdl_ir = TwoCurrencyFXModel.from_ir_models(
+            domestic=dom_p,
+            foreign=for_p,
+            spot_fx=1.20,
+            fx_vol_ann=0.10,
+            correlation_matrix=self.corr,
+        )
+        self.assertIsInstance(mdl_ir.domestic_ir_model, LGMModel)
+        self.assertIsInstance(mdl_ir.foreign_ir_model, LGMModel)
+
+        # from_components with InterestRateModel instances
+        mdl_comp = TwoCurrencyFXModel.from_components(
+            domestic=self.dom_model,
+            foreign=self.for_model,
+            spot_fx=1.20,
+            fx_vol_ann=0.10,
+            correlation_matrix=self.corr,
+        )
+        self.assertIs(mdl_comp.domestic_ir_model, self.dom_model)
+        self.assertIs(mdl_comp.foreign_ir_model, self.for_model)
 
     def test_simulate_paths_hw(self) -> None:
         """Verify path simulation with Hull-White interest rate models."""

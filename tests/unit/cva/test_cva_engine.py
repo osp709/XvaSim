@@ -7,11 +7,15 @@ import numpy as np
 
 from xvasim.cva_engine import (
     CIRParams,
+    _calibrate_cir,
+    _calibrate_credit_model,
     _cir_survival_probability,
+    _credit_model_survival_probability,
     compute_cva,
     compute_cva_chunked,
     compute_marginal_pd,
 )
+from xvasim.models.credit.cir import CIRHazardRateModel
 
 
 class TestCvaEngine(unittest.TestCase):
@@ -122,6 +126,14 @@ class TestCirSurvivalProbability(unittest.TestCase):
         surv = _cir_survival_probability(tenors_yrs, self._DEFAULT_PARAMS)
         np.testing.assert_allclose(surv, [1.0], atol=1e-10)
 
+        # Test _credit_model_survival_probability with CIRParams and Model
+        surv_gn = _credit_model_survival_probability(tenors_yrs, self._DEFAULT_PARAMS)
+        np.testing.assert_allclose(surv_gn, [1.0], atol=1e-10)
+
+        model = CIRHazardRateModel(self._DEFAULT_PARAMS)
+        surv_mdl = _credit_model_survival_probability(tenors_yrs, model)
+        np.testing.assert_allclose(surv_mdl, [1.0], atol=1e-10)
+
     def test_survival_probability_decreasing(self) -> None:
         """Survival probability should decrease with tenor."""
         tenors_yrs = np.array([0.5, 1.0, 2.0, 5.0, 10.0])
@@ -135,6 +147,19 @@ class TestCirSurvivalProbability(unittest.TestCase):
         surv = _cir_survival_probability(tenors_yrs, self._DEFAULT_PARAMS)
         self.assertTrue(np.all(surv > 0))
         self.assertTrue(np.all(surv <= 1.0))
+
+    def test_calibrate_credit_model(self) -> None:
+        """Verify _calibrate_credit_model and _calibrate_cir."""
+        tenors = np.array([1.0, 2.0, 3.0, 5.0])
+        spreads = np.array([0.015, 0.018, 0.020, 0.025])
+        cal_params = _calibrate_credit_model(spreads, tenors, model_type="cir")
+        self.assertIsInstance(cal_params, CIRParams)
+
+        cal_alias = _calibrate_cir(spreads, tenors)
+        self.assertEqual(cal_params.kappa_ann, cal_alias.kappa_ann)
+
+        with self.assertRaises(ValueError):
+            _calibrate_credit_model(spreads, tenors, model_type="unknown")
 
 
 class TestComputeMarginalPd(unittest.TestCase):

@@ -189,6 +189,132 @@ class TestJITKernels(unittest.TestCase):
         self.assertAlmostEqual(dfs[0, 1], np.exp(-0.05), places=8)
         self.assertAlmostEqual(dfs[0, 2], np.exp(-0.10), places=8)
 
+    def test_py_func_fallbacks(self) -> None:
+        """Verify .py_func uncompiled implementations directly for coverage."""
+        cir_surv_py = getattr(cir_survival_probability_kernel, "py_func", cir_survival_probability_kernel)
+        cir_obj_py = getattr(cir_calibration_objective_kernel, "py_func", cir_calibration_objective_kernel)
+        cir_sim_py = getattr(cir_simulate_paths_kernel, "py_func", cir_simulate_paths_kernel)
+        lgm_sim_py = getattr(lgm_simulate_paths_kernel, "py_func", lgm_simulate_paths_kernel)
+        vas_sim_py = getattr(vasicek_simulate_paths_kernel, "py_func", vasicek_simulate_paths_kernel)
+        hw_sim_py = getattr(hull_white_simulate_paths_kernel, "py_func", hull_white_simulate_paths_kernel)
+        heston_sim_py = getattr(heston_simulate_paths_kernel, "py_func", heston_simulate_paths_kernel)
+        disc_py = getattr(discount_path_kernel, "py_func", discount_path_kernel)
+
+        tenors = np.array([0.0, 1.0, 2.0])
+        spreads = np.array([0.02, 0.022, 0.025])
+        p_vec = np.array([0.5, 0.03, 0.10, 0.02])
+
+        surv = cir_surv_py(tenors, 0.5, 0.03, 0.10, 0.02)
+        self.assertEqual(len(surv), 3)
+
+        obj_val = cir_obj_py(p_vec, tenors, spreads)
+        self.assertGreaterEqual(obj_val, 0.0)
+
+        dt_vec = np.full(5, 0.2)
+        dw = np.zeros((10, 5))
+        sigmas = np.full(5, 0.01)
+        theta_vec = np.full(5, 0.03)
+
+        cir_paths = cir_sim_py(10, 5, dt_vec, 0.2, 0.03, 0.08, 0.025, dw)
+        self.assertEqual(cir_paths.shape, (10, 6))
+
+        lgm_paths = lgm_sim_py(10, 5, dt_vec, 0.03, sigmas, dw)
+        self.assertEqual(lgm_paths.shape, (10, 6))
+
+        vas_paths = vas_sim_py(10, 5, dt_vec, 0.15, 0.03, 0.015, 0.025, dw)
+        self.assertEqual(vas_paths.shape, (10, 6))
+
+        hw_paths = hw_sim_py(10, 5, dt_vec, 0.03, 0.01, theta_vec, 0.025, dw)
+        self.assertEqual(hw_paths.shape, (10, 6))
+
+        z_all = np.zeros((10, 5, 2))
+        r_d = np.full(5, 0.03)
+        r_f = np.full(5, 0.01)
+        v_p, fx_p = heston_sim_py(10, 5, 0.2, np.sqrt(0.2), 0.04, 1.2, 1.5, 0.04, 0.2, -0.5, r_d, r_f, z_all)
+        self.assertEqual(v_p.shape, (10, 6))
+        self.assertEqual(fx_p.shape, (10, 6))
+
+        rates = np.full((10, 3), 0.05)
+        dfs = disc_py(tenors, rates)
+        self.assertEqual(dfs.shape, (10, 3))
+
+    def test_simulate_model_paths_kernel_dispatcher(self) -> None:
+        """Verify simulate_model_paths_kernel dispatches correctly across all supported models."""
+        from xvasim.jit import (
+            credit_calibration_objective_kernel,
+            credit_survival_probability_kernel,
+            simulate_model_paths_kernel,
+        )
+
+        n_paths, n_steps = 10, 4
+        dt_vec = np.full(n_steps, 0.25)
+        dw = np.random.standard_normal((n_paths, n_steps)) * 0.5
+        sigmas = np.full(n_steps, 0.01)
+        theta_vec = np.full(n_steps, 0.03)
+
+        # CIR dispatch
+        cir_paths = simulate_model_paths_kernel(
+            "cir", n_paths, n_steps, dt_vec, 0.2, 0.03, 0.08, 0.025, dw
+        )
+        self.assertEqual(cir_paths.shape, (n_paths, n_steps + 1))
+
+        # LGM dispatch
+        lgm_paths = simulate_model_paths_kernel(
+            "lgm", n_paths, n_steps, dt_vec, 0.03, sigmas, dw
+        )
+        self.assertEqual(lgm_paths.shape, (n_paths, n_steps + 1))
+
+        # Vasicek dispatch
+        vas_paths = simulate_model_paths_kernel(
+            "vasicek", n_paths, n_steps, dt_vec, 0.15, 0.03, 0.015, 0.025, dw
+        )
+        self.assertEqual(vas_paths.shape, (n_paths, n_steps + 1))
+
+        # Hull-White dispatch
+        hw_paths = simulate_model_paths_kernel(
+            "hull_white", n_paths, n_steps, dt_vec, 0.03, 0.01, theta_vec, 0.025, dw
+        )
+        self.assertEqual(hw_paths.shape, (n_paths, n_steps + 1))
+
+        # Heston dispatch
+        z_all = np.random.standard_normal((n_paths, n_steps, 2))
+        r_d = np.full(n_steps, 0.03)
+        r_f = np.full(n_steps, 0.01)
+        v_p, fx_p = simulate_model_paths_kernel(
+            "heston",
+            n_paths,
+            n_steps,
+            0.25,
+            0.5,
+            0.04,
+            1.2,
+            1.5,
+            0.04,
+            0.2,
+            -0.5,
+            r_d,
+            r_f,
+            z_all,
+        )
+        self.assertEqual(v_p.shape, (n_paths, n_steps + 1))
+        self.assertEqual(fx_p.shape, (n_paths, n_steps + 1))
+
+        # Invalid model type raises ValueError
+        with self.assertRaises(ValueError):
+            simulate_model_paths_kernel("unsupported_model", n_paths, n_steps)
+
+        # Credit kernels parity
+        tenors = np.array([0.0, 1.0, 2.0])
+        surv1 = credit_survival_probability_kernel(tenors, 0.5, 0.03, 0.10, 0.02)
+        surv2 = cir_survival_probability_kernel(tenors, 0.5, 0.03, 0.10, 0.02)
+        np.testing.assert_allclose(surv1, surv2)
+
+        spreads = np.array([0.02, 0.022, 0.025])
+        p_vec = np.array([0.5, 0.03, 0.10, 0.02])
+        obj1 = credit_calibration_objective_kernel(p_vec, tenors, spreads)
+        obj2 = cir_calibration_objective_kernel(p_vec, tenors, spreads)
+        self.assertEqual(obj1, obj2)
+
 
 if __name__ == "__main__":
     unittest.main()

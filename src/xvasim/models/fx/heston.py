@@ -74,12 +74,14 @@ class HestonFXModel(FXModel):
 
     def __init__(
         self,
-        spot_fx: float,
-        v_0: float,
-        kappa_ann: float,
-        theta_ann: float,
-        sigma_v_ann: float,
-        rho: float,
+        params: HestonFXParams | None = None,
+        *,
+        spot_fx: float = 1.0,
+        v_0: float = 0.04,
+        kappa_ann: float = 2.0,
+        theta_ann: float = 0.04,
+        sigma_v_ann: float = 0.20,
+        rho: float = -0.5,
         domestic_rate_ann: float = 0.0,
         foreign_rate_ann: float = 0.0,
         discount_curve_domestic_yrs: np.ndarray | None = None,
@@ -90,6 +92,7 @@ class HestonFXModel(FXModel):
         """Initialize the Heston FX stochastic volatility model.
 
         Args:
+            params: Optional :class:`HestonFXParams` instance.
             spot_fx: Current spot FX rate (units of domestic per 1 foreign).
             v_0: Initial variance (v_0 >= 0).
             kappa_ann: Mean-reversion speed of variance (kappa > 0).
@@ -104,73 +107,100 @@ class HestonFXModel(FXModel):
             discount_curve_foreign_yrs: Optional foreign curve tenors.
             discount_factors_foreign: Optional foreign discount factors.
         """
-        if spot_fx <= 0.0:
-            msg = f"spot_fx must be strictly positive, got {spot_fx}"
-            raise ValueError(msg)
-        if v_0 < 0.0:
-            msg = f"v_0 must be non-negative, got {v_0}"
-            raise ValueError(msg)
-        if kappa_ann <= 0.0:
-            msg = f"kappa_ann must be strictly positive, got {kappa_ann}"
-            raise ValueError(msg)
-        if theta_ann < 0.0:
-            msg = f"theta_ann must be non-negative, got {theta_ann}"
-            raise ValueError(msg)
-        if sigma_v_ann < 0.0:
-            msg = f"sigma_v_ann must be non-negative, got {sigma_v_ann}"
-            raise ValueError(msg)
-        if not (-1.0 <= rho <= 1.0):
-            msg = f"rho must be in [-1, 1], got {rho}"
-            raise ValueError(msg)
-
-        self._spot_fx = float(spot_fx)
-        self._v_0 = float(v_0)
-        self._kappa_ann = float(kappa_ann)
-        self._theta_ann = float(theta_ann)
-        self._sigma_v_ann = float(sigma_v_ann)
-        self._rho = float(rho)
-        self._domestic_rate_ann = float(domestic_rate_ann)
-        self._foreign_rate_ann = float(foreign_rate_ann)
-
-        if discount_curve_domestic_yrs is not None:
-            self._dom_curve_yrs: np.ndarray | None = np.asarray(
-                discount_curve_domestic_yrs, dtype=np.float64
-            )
-            self._dom_dfs: np.ndarray | None = np.asarray(
-                discount_factors_domestic, dtype=np.float64
-            )
+        if params is not None:
+            self._params = params
         else:
-            self._dom_curve_yrs = None
-            self._dom_dfs = None
+            if spot_fx <= 0.0:
+                msg = f"spot_fx must be strictly positive, got {spot_fx}"
+                raise ValueError(msg)
+            if v_0 < 0.0:
+                msg = f"v_0 must be non-negative, got {v_0}"
+                raise ValueError(msg)
+            if kappa_ann <= 0.0:
+                msg = f"kappa_ann must be strictly positive, got {kappa_ann}"
+                raise ValueError(msg)
+            if theta_ann < 0.0:
+                msg = f"theta_ann must be non-negative, got {theta_ann}"
+                raise ValueError(msg)
+            if sigma_v_ann < 0.0:
+                msg = f"sigma_v_ann must be non-negative, got {sigma_v_ann}"
+                raise ValueError(msg)
+            if not (-1.0 <= rho <= 1.0):
+                msg = f"rho must be in [-1, 1], got {rho}"
+                raise ValueError(msg)
 
-        if discount_curve_foreign_yrs is not None:
-            self._for_curve_yrs: np.ndarray | None = np.asarray(
-                discount_curve_foreign_yrs, dtype=np.float64
+            self._params = HestonFXParams(
+                spot_fx=float(spot_fx),
+                v_0=float(v_0),
+                kappa_ann=float(kappa_ann),
+                theta_ann=float(theta_ann),
+                sigma_v_ann=float(sigma_v_ann),
+                rho=float(rho),
+                domestic_rate_ann=float(domestic_rate_ann),
+                foreign_rate_ann=float(foreign_rate_ann),
+                discount_curve_domestic_yrs=(
+                    np.asarray(discount_curve_domestic_yrs, dtype=np.float64)
+                    if discount_curve_domestic_yrs is not None
+                    else None
+                ),
+                discount_factors_domestic=(
+                    np.asarray(discount_factors_domestic, dtype=np.float64)
+                    if discount_factors_domestic is not None
+                    else None
+                ),
+                discount_curve_foreign_yrs=(
+                    np.asarray(discount_curve_foreign_yrs, dtype=np.float64)
+                    if discount_curve_foreign_yrs is not None
+                    else None
+                ),
+                discount_factors_foreign=(
+                    np.asarray(discount_factors_foreign, dtype=np.float64)
+                    if discount_factors_foreign is not None
+                    else None
+                ),
             )
-            self._for_dfs: np.ndarray | None = np.asarray(
-                discount_factors_foreign, dtype=np.float64
-            )
-        else:
-            self._for_curve_yrs = None
-            self._for_dfs = None
+
+        if self._params.spot_fx <= 0.0:
+            msg = f"spot_fx must be strictly positive, got {self._params.spot_fx}"
+            raise ValueError(msg)
+        if self._params.v_0 < 0.0:
+            msg = f"v_0 must be non-negative, got {self._params.v_0}"
+            raise ValueError(msg)
+        if self._params.kappa_ann <= 0.0:
+            msg = f"kappa_ann must be strictly positive, got {self._params.kappa_ann}"
+            raise ValueError(msg)
+        if self._params.theta_ann < 0.0:
+            msg = f"theta_ann must be non-negative, got {self._params.theta_ann}"
+            raise ValueError(msg)
+        if self._params.sigma_v_ann < 0.0:
+            msg = f"sigma_v_ann must be non-negative, got {self._params.sigma_v_ann}"
+            raise ValueError(msg)
+        if not (-1.0 <= self._params.rho <= 1.0):
+            msg = f"rho must be in [-1, 1], got {self._params.rho}"
+            raise ValueError(msg)
+
+        self._spot_fx = self._params.spot_fx
+        self._v_0 = self._params.v_0
+        self._kappa_ann = self._params.kappa_ann
+        self._theta_ann = self._params.theta_ann
+        self._sigma_v_ann = self._params.sigma_v_ann
+        self._rho = self._params.rho
+        self._domestic_rate_ann = self._params.domestic_rate_ann
+        self._foreign_rate_ann = self._params.foreign_rate_ann
+        self._dom_curve_yrs = self._params.discount_curve_domestic_yrs
+        self._dom_dfs = self._params.discount_factors_domestic
+        self._for_curve_yrs = self._params.discount_curve_foreign_yrs
+        self._for_dfs = self._params.discount_factors_foreign
 
     @classmethod
     def from_params(cls, params: HestonFXParams) -> HestonFXModel:
         """Construct a HestonFXModel from a parameters object."""
-        return cls(
-            spot_fx=params.spot_fx,
-            v_0=params.v_0,
-            kappa_ann=params.kappa_ann,
-            theta_ann=params.theta_ann,
-            sigma_v_ann=params.sigma_v_ann,
-            rho=params.rho,
-            domestic_rate_ann=params.domestic_rate_ann,
-            foreign_rate_ann=params.foreign_rate_ann,
-            discount_curve_domestic_yrs=params.discount_curve_domestic_yrs,
-            discount_factors_domestic=params.discount_factors_domestic,
-            discount_curve_foreign_yrs=params.discount_curve_foreign_yrs,
-            discount_factors_foreign=params.discount_factors_foreign,
-        )
+        return cls(params=params)
+
+    @property
+    def params(self) -> HestonFXParams:
+        """The underlying :class:`HestonFXParams`."""
+        return self._params
 
     @property
     def model_name(self) -> str:

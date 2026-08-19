@@ -32,6 +32,12 @@ class TestGarmanKohlhagenFXModel(unittest.TestCase):
         with self.assertRaises(ValueError):
             GarmanKohlhagenFXModel(spot_fx=1.15, fx_vol_ann=-0.05)
 
+        with self.assertRaises(ValueError):
+            GarmanKohlhagenFXModel(params=GarmanKohlhagenParams(spot_fx=-1.0, fx_vol_ann=0.10))
+
+        with self.assertRaises(ValueError):
+            GarmanKohlhagenFXModel(params=GarmanKohlhagenParams(spot_fx=1.0, fx_vol_ann=-0.10))
+
     def test_from_params(self) -> None:
         """Verify initialization via GarmanKohlhagenParams."""
         params = GarmanKohlhagenParams(
@@ -46,6 +52,11 @@ class TestGarmanKohlhagenFXModel(unittest.TestCase):
         self.assertEqual(mdl.fx_vol_ann, 0.15)
         self.assertEqual(mdl.domestic_rate_ann, 0.04)
         self.assertEqual(mdl.foreign_rate_ann, 0.02)
+        self.assertIs(mdl.params, params)
+
+        mdl_direct = GarmanKohlhagenFXModel(params=params)
+        self.assertEqual(mdl_direct.spot_fx, 1.20)
+        self.assertIs(mdl_direct.params, params)
 
     def test_curve_discount_factors_and_forward(self) -> None:
         """Verify discount factors and forward rates with discrete curves."""

@@ -17,6 +17,7 @@ from .cva_engine import (
     CIRParams,
     compute_cva,
     compute_cva_chunked,
+    compute_exposure_profile,
     compute_marginal_pd,
 )
 from .jit import (
@@ -50,6 +51,8 @@ from .models import (
     InflationModel,
     InflationSimulationResult,
     InterestRateModel,
+    JarrowYildirimModel,
+    JarrowYildirimParams,
     LGMModel,
     ModelRegistry,
     RiskFactorType,
@@ -63,14 +66,11 @@ from .models import (
     create_ir_model,
     list_available_models,
 )
-from .models.inflation import (
-    JarrowYildirimModel,
-    JarrowYildirimParams,
-)
 from .pricing_engine import (
     FXLGMParams,
     LGMParams,
     OptionType,
+    PricingResult,
     SwapLegType,
     benchmark_price_consumer_price_index_option,
     benchmark_price_cpi_option,
@@ -141,6 +141,7 @@ __all__ = [
     "ModelRegistry",
     "NumPyBackend",
     "OptionType",
+    "PricingResult",
     "PyTorchBackend",
     "QMCSequenceCache",
     "QMCSequenceGenerator",
@@ -174,6 +175,7 @@ __all__ = [
     "compare_t0_npv_fitting",
     "compute_cva",
     "compute_cva_chunked",
+    "compute_exposure_profile",
     "compute_marginal_pd",
     "create_credit_model",
     "create_fx_model",

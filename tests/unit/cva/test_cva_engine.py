@@ -13,6 +13,7 @@ from xvasim.cva_engine import (
     _credit_model_survival_probability,
     compute_cva,
     compute_cva_chunked,
+    compute_exposure_profile,
     compute_marginal_pd,
 )
 from xvasim.models.credit.cir import CIRHazardRateModel
@@ -111,6 +112,62 @@ class TestCvaEngine(unittest.TestCase):
 
         cva_gen = compute_cva_chunked([], np.zeros(5), np.zeros(5), 0.6)
         self.assertEqual(cva_gen, 0.0)
+
+    def test_compute_cva_chunked_2d_matrix(self) -> None:
+        """Verify 2-D matrix streaming with chunk offset advancement."""
+        n_paths, n_dates = 400, 4
+        rng = np.random.default_rng(99)
+        exposure = rng.uniform(10.0, 50.0, size=(n_paths, n_dates))
+        marginal_pd_2d = rng.uniform(0.01, 0.03, size=(n_paths, n_dates))
+        discount_factor_2d = rng.uniform(0.90, 0.99, size=(n_paths, n_dates))
+        lgd = 0.40
+
+        expected_cva = compute_cva(
+            exposure=exposure,
+            marginal_pd=marginal_pd_2d,
+            discount_factor=discount_factor_2d,
+            loss_given_default=lgd,
+        )
+
+        def chunk_gen() -> typing.Iterator[np.ndarray]:
+            for i in range(0, n_paths, 100):
+                yield exposure[i : i + 100]
+
+        chunked_cva = compute_cva_chunked(
+            exposure_chunks=chunk_gen(),
+            marginal_pd=marginal_pd_2d,
+            discount_factor=discount_factor_2d,
+            loss_given_default=lgd,
+        )
+        self.assertAlmostEqual(expected_cva, chunked_cva, places=9)
+
+    def test_compute_exposure_profile(self) -> None:
+        """Verify Expected Exposure, EPE, Max PFE, and percentile profiles."""
+        rng = np.random.default_rng(42)
+        n_paths, n_steps = 10_000, 5
+        # Generate some synthetic exposure matrix with negative and positive values
+        exposure = rng.normal(loc=10.0, scale=20.0, size=(n_paths, n_steps))
+
+        profile = compute_exposure_profile(exposure, percentiles=[95.0, 99.0])
+        self.assertIn("expected_exposure", profile)
+        self.assertIn("expected_positive_exposure", profile)
+        self.assertIn("pfe_95.0", profile)
+        self.assertIn("pfe_99.0", profile)
+        self.assertIn("max_pfe", profile)
+
+        ee = profile["expected_exposure"]
+        epe = profile["expected_positive_exposure"]
+        self.assertEqual(len(ee), n_steps)
+        self.assertIsInstance(epe, float)
+        self.assertAlmostEqual(epe, float(np.mean(ee)))
+
+        # Max PFE must match maximum across time of 99th percentile (highest percentile)
+        self.assertAlmostEqual(profile["max_pfe"], float(np.max(profile["pfe_99.0"])))
+
+        # Test empty exposure matrix edge case
+        empty_prof = compute_exposure_profile(np.zeros((0, 5)))
+        self.assertEqual(len(empty_prof["expected_exposure"]), 0)
+        self.assertEqual(empty_prof["max_pfe"], 0.0)
 
 
 class TestCirSurvivalProbability(unittest.TestCase):

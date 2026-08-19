@@ -328,6 +328,7 @@ source = { editable = "." }
 dependencies = [
     { name = "numba" },
     { name = "numexpr" },
+    { name = "numpy" },
     { name = "scipy" },
 ]
 
@@ -345,6 +346,7 @@ dev = [
 requires-dist = [
     { name = "numba", specifier = ">=0.60.0" },
     { name = "numexpr", specifier = ">=2.8.0" },
+    { name = "numpy", specifier = ">=2.0.0" },
     { name = "scipy", specifier = ">=1.18.0" },
 ]
 

@@ -62,8 +62,10 @@ class GarmanKohlhagenFXModel(FXModel):
 
     def __init__(
         self,
-        spot_fx: float,
-        fx_vol_ann: float,
+        params: GarmanKohlhagenParams | None = None,
+        *,
+        spot_fx: float = 1.0,
+        fx_vol_ann: float = 0.10,
         domestic_rate_ann: float = 0.0,
         foreign_rate_ann: float = 0.0,
         discount_curve_domestic_yrs: np.ndarray | None = None,
@@ -74,6 +76,7 @@ class GarmanKohlhagenFXModel(FXModel):
         """Initialize the Garman-Kohlhagen FX model.
 
         Args:
+            params: Optional :class:`GarmanKohlhagenParams` instance.
             spot_fx: Current spot FX rate (units of domestic per 1 foreign).
             fx_vol_ann: Annualised log-normal FX volatility.
             domestic_rate_ann: Constant domestic interest rate (annualised).
@@ -83,53 +86,68 @@ class GarmanKohlhagenFXModel(FXModel):
             discount_curve_foreign_yrs: Optional foreign curve tenors.
             discount_factors_foreign: Optional foreign discount factors.
         """
-        if spot_fx <= 0.0:
-            msg = f"spot_fx must be strictly positive, got {spot_fx}"
-            raise ValueError(msg)
-        if fx_vol_ann < 0.0:
-            msg = f"fx_vol_ann must be non-negative, got {fx_vol_ann}"
-            raise ValueError(msg)
-
-        self._spot_fx = float(spot_fx)
-        self._fx_vol_ann = float(fx_vol_ann)
-        self._domestic_rate_ann = float(domestic_rate_ann)
-        self._foreign_rate_ann = float(foreign_rate_ann)
-
-        if discount_curve_domestic_yrs is not None:
-            self._dom_curve_yrs: np.ndarray | None = np.asarray(
-                discount_curve_domestic_yrs, dtype=np.float64
-            )
-            self._dom_dfs: np.ndarray | None = np.asarray(
-                discount_factors_domestic, dtype=np.float64
-            )
+        if params is not None:
+            self._params = params
         else:
-            self._dom_curve_yrs = None
-            self._dom_dfs = None
+            if spot_fx <= 0.0:
+                msg = f"spot_fx must be strictly positive, got {spot_fx}"
+                raise ValueError(msg)
+            if fx_vol_ann < 0.0:
+                msg = f"fx_vol_ann must be non-negative, got {fx_vol_ann}"
+                raise ValueError(msg)
 
-        if discount_curve_foreign_yrs is not None:
-            self._for_curve_yrs: np.ndarray | None = np.asarray(
-                discount_curve_foreign_yrs, dtype=np.float64
+            self._params = GarmanKohlhagenParams(
+                spot_fx=float(spot_fx),
+                fx_vol_ann=float(fx_vol_ann),
+                domestic_rate_ann=float(domestic_rate_ann),
+                foreign_rate_ann=float(foreign_rate_ann),
+                discount_curve_domestic_yrs=(
+                    np.asarray(discount_curve_domestic_yrs, dtype=np.float64)
+                    if discount_curve_domestic_yrs is not None
+                    else None
+                ),
+                discount_factors_domestic=(
+                    np.asarray(discount_factors_domestic, dtype=np.float64)
+                    if discount_factors_domestic is not None
+                    else None
+                ),
+                discount_curve_foreign_yrs=(
+                    np.asarray(discount_curve_foreign_yrs, dtype=np.float64)
+                    if discount_curve_foreign_yrs is not None
+                    else None
+                ),
+                discount_factors_foreign=(
+                    np.asarray(discount_factors_foreign, dtype=np.float64)
+                    if discount_factors_foreign is not None
+                    else None
+                ),
             )
-            self._for_dfs: np.ndarray | None = np.asarray(
-                discount_factors_foreign, dtype=np.float64
-            )
-        else:
-            self._for_curve_yrs = None
-            self._for_dfs = None
+
+        if self._params.spot_fx <= 0.0:
+            msg = f"spot_fx must be strictly positive, got {self._params.spot_fx}"
+            raise ValueError(msg)
+        if self._params.fx_vol_ann < 0.0:
+            msg = f"fx_vol_ann must be non-negative, got {self._params.fx_vol_ann}"
+            raise ValueError(msg)
+
+        self._spot_fx = self._params.spot_fx
+        self._fx_vol_ann = self._params.fx_vol_ann
+        self._domestic_rate_ann = self._params.domestic_rate_ann
+        self._foreign_rate_ann = self._params.foreign_rate_ann
+        self._dom_curve_yrs = self._params.discount_curve_domestic_yrs
+        self._dom_dfs = self._params.discount_factors_domestic
+        self._for_curve_yrs = self._params.discount_curve_foreign_yrs
+        self._for_dfs = self._params.discount_factors_foreign
 
     @classmethod
     def from_params(cls, params: GarmanKohlhagenParams) -> GarmanKohlhagenFXModel:
         """Construct a GarmanKohlhagenFXModel from a parameters object."""
-        return cls(
-            spot_fx=params.spot_fx,
-            fx_vol_ann=params.fx_vol_ann,
-            domestic_rate_ann=params.domestic_rate_ann,
-            foreign_rate_ann=params.foreign_rate_ann,
-            discount_curve_domestic_yrs=params.discount_curve_domestic_yrs,
-            discount_factors_domestic=params.discount_factors_domestic,
-            discount_curve_foreign_yrs=params.discount_curve_foreign_yrs,
-            discount_factors_foreign=params.discount_factors_foreign,
-        )
+        return cls(params=params)
+
+    @property
+    def params(self) -> GarmanKohlhagenParams:
+        """The underlying :class:`GarmanKohlhagenParams`."""
+        return self._params
 
     @property
     def model_name(self) -> str:

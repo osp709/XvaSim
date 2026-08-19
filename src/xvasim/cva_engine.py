@@ -11,6 +11,7 @@ Public API
 - :class:`CIRParams` — calibrated CIR model parameters (re-exported).
 - :func:`compute_cva` — path-wise CVA aggregation with numexpr and chunking.
 - :func:`compute_cva_chunked` — generator/iterable streaming CVA aggregation.
+- :func:`compute_exposure_profile` — counterparty EE, EPE, and PFE metrics.
 - :func:`compute_marginal_pd` — marginal default probabilities from spreads.
 
 Units & Conventions
@@ -40,6 +41,7 @@ __all__ = [
     "CIRParams",
     "compute_cva",
     "compute_cva_chunked",
+    "compute_exposure_profile",
     "compute_marginal_pd",
 ]
 
@@ -271,14 +273,20 @@ def compute_cva_chunked(
     df_arr = np.asarray(discount_factor, dtype=np.float64)
     lgd = float(loss_given_default)
 
+    offset = 0
     for chunk in exposure_chunks:
         exp_chunk = np.asarray(chunk, dtype=np.float64)
         c_paths = exp_chunk.shape[0]
         if c_paths == 0:
             continue
 
-        pd_chunk = pd_arr[:c_paths] if pd_arr.ndim == 2 else pd_arr
-        df_chunk = df_arr[:c_paths] if df_arr.ndim == 2 else df_arr
+        pd_chunk = (
+            pd_arr[offset : offset + c_paths] if pd_arr.ndim == 2 else pd_arr
+        )
+        df_chunk = (
+            df_arr[offset : offset + c_paths] if df_arr.ndim == 2 else df_arr
+        )
+        offset += c_paths
 
         if use_numexpr and HAS_NUMEXPR and _ne is not None:
             chunk_sum = float(
@@ -294,3 +302,74 @@ def compute_cva_chunked(
         return 0.0
 
     return float(total_weighted_cva / total_paths)
+
+
+def compute_exposure_profile(
+    exposure: np.ndarray,
+    percentiles: typing.Sequence[float] = (95.0, 97.5, 99.0),
+) -> dict[str, typing.Any]:
+    r"""Compute counterparty exposure profiles: Expected Exposure (EE), EPE, and PFE.
+
+    Given a simulated portfolio exposure matrix :math:`E_{i, j}` of shape
+    ``(n_paths, n_dates)``:
+    - **Expected Exposure (EE)**: :math:`EE(t_j) = \frac{1}{N}\sum_{i=1}^N E_{i, j}`
+    - **Expected Positive Exposure (EPE)**: Average Expected Exposure across time.
+    - **Potential Future Exposure (PFE)**: Path-wise quantiles at given
+      confidence level(s).
+    - **Max PFE**: Peak value of the PFE profile.
+
+    Args:
+        exposure: 2-D array of shape ``(n_paths, n_dates)`` containing
+            portfolio exposure paths.
+        percentiles: Sequence of percentile confidence levels
+            (default: (95.0, 97.5, 99.0)).
+
+    Returns:
+        Dictionary containing:
+        - ``"expected_exposure"`` (and ``"ee"``): 1-D array of shape ``(n_dates,)``.
+        - ``"expected_positive_exposure"`` (and ``"epe"``): scalar float.
+        - ``"max_pfe"``: scalar float (peak across highest computed percentile).
+        - ``"pfe_profiles"``: dict mapping float percentile level to 1-D PFE curve.
+        - Convenience percentile keys (e.g. ``"pfe_95"``, ``"pfe_99"``).
+    """
+    exp_arr = np.asarray(exposure, dtype=np.float64)
+    if exp_arr.ndim == 1:
+        exp_arr = exp_arr.reshape(1, -1)
+
+    n_paths, n_dates = exp_arr.shape
+    if n_paths == 0 or n_dates == 0:
+        return {
+            "expected_exposure": np.array([], dtype=np.float64),
+            "ee": np.array([], dtype=np.float64),
+            "expected_positive_exposure": 0.0,
+            "epe": 0.0,
+            "max_pfe": 0.0,
+            "pfe_profiles": {},
+        }
+
+    ee = np.mean(exp_arr, axis=0)
+    epe = float(np.mean(ee))
+
+    pfe_profiles: dict[float, np.ndarray] = {}
+    result: dict[str, typing.Any] = {
+        "expected_exposure": ee,
+        "ee": ee,
+        "expected_positive_exposure": epe,
+        "epe": epe,
+        "pfe_profiles": pfe_profiles,
+    }
+
+    max_pfe_val = 0.0
+    for p in percentiles:
+        p_val = float(p)
+        pfe_curve = np.percentile(exp_arr, p_val, axis=0)
+        pfe_profiles[p_val] = pfe_curve
+        max_pfe_val = max(max_pfe_val, float(np.max(pfe_curve)))
+        result[f"pfe_{p_val}"] = pfe_curve
+        if p_val.is_integer():
+            result[f"pfe_{int(p_val)}"] = pfe_curve
+        clean_key = f"pfe_{str(p_val).replace('.', '_').rstrip('_0')}"
+        result[clean_key] = pfe_curve
+
+    result["max_pfe"] = max_pfe_val
+    return result

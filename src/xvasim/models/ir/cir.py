@@ -46,6 +46,8 @@ class CIRInterestRateParams:
 
 
 @ModelRegistry.register("interest_rate", "cir")
+@ModelRegistry.register("interest_rate", "cir_ir")
+@ModelRegistry.register("interest_rate", "cox_ingersoll_ross")
 class CIRInterestRateModel(InterestRateModel):
     """Cox-Ingersoll-Ross (1985) short-rate interest rate model."""
 

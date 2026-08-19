@@ -52,6 +52,8 @@ class CIRParams:
 
 
 @ModelRegistry.register("credit", "cir")
+@ModelRegistry.register("credit", "cir_hazard_rate")
+@ModelRegistry.register("credit", "cox_ingersoll_ross")
 class CIRHazardRateModel(CreditModel):
     """CIR-based hazard rate and credit model."""
 

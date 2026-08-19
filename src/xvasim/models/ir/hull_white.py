@@ -48,6 +48,7 @@ class HullWhite1FParams:
 
 
 @ModelRegistry.register("interest_rate", "hull_white")
+@ModelRegistry.register("interest_rate", "hull_white_1f")
 @ModelRegistry.register("interest_rate", "hw1f")
 class HullWhite1FModel(InterestRateModel):
     """Hull-White 1-Factor (HW1F) interest rate model."""

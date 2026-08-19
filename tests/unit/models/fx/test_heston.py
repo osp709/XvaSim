@@ -81,6 +81,19 @@ class TestHestonFXModel(unittest.TestCase):
                 rho=1.5,
             )
 
+        with self.assertRaises(ValueError):
+            HestonFXModel(params=HestonFXParams(spot_fx=-1.0, v_0=0.04, kappa_ann=2.0, theta_ann=0.04, sigma_v_ann=0.2, rho=0.0))
+        with self.assertRaises(ValueError):
+            HestonFXModel(params=HestonFXParams(spot_fx=1.0, v_0=-0.04, kappa_ann=2.0, theta_ann=0.04, sigma_v_ann=0.2, rho=0.0))
+        with self.assertRaises(ValueError):
+            HestonFXModel(params=HestonFXParams(spot_fx=1.0, v_0=0.04, kappa_ann=-2.0, theta_ann=0.04, sigma_v_ann=0.2, rho=0.0))
+        with self.assertRaises(ValueError):
+            HestonFXModel(params=HestonFXParams(spot_fx=1.0, v_0=0.04, kappa_ann=2.0, theta_ann=-0.04, sigma_v_ann=0.2, rho=0.0))
+        with self.assertRaises(ValueError):
+            HestonFXModel(params=HestonFXParams(spot_fx=1.0, v_0=0.04, kappa_ann=2.0, theta_ann=0.04, sigma_v_ann=-0.2, rho=0.0))
+        with self.assertRaises(ValueError):
+            HestonFXModel(params=HestonFXParams(spot_fx=1.0, v_0=0.04, kappa_ann=2.0, theta_ann=0.04, sigma_v_ann=0.2, rho=2.0))
+
     def test_from_params_and_properties(self) -> None:
         """Verify factory constructor and property accessors."""
         params = HestonFXParams(
@@ -105,6 +118,11 @@ class TestHestonFXModel(unittest.TestCase):
         self.assertEqual(mdl.domestic_rate_ann, 0.04)
         self.assertEqual(mdl.foreign_rate_ann, 0.02)
         self.assertTrue(mdl.is_feller_satisfied)
+        self.assertIs(mdl.params, params)
+
+        mdl_direct = HestonFXModel(params=params)
+        self.assertEqual(mdl_direct.spot_fx, 1.20)
+        self.assertIs(mdl_direct.params, params)
 
     def test_feller_condition(self) -> None:
         """Verify Feller condition check."""

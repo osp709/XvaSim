@@ -395,8 +395,6 @@ def _heston_simulate_paths_kernel(
             drift_s = (r_d - r_f) - 0.5 * v_pos
             ln_fx[p, step + 1] = ln_fx[p, step] + drift_s * dt + sqrt_v_pos * dw_s
 
-            v_paths[p, step + 1] = v_next
-
     fx_spot = np.exp(ln_fx)
     return v_paths, fx_spot
 

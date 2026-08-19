@@ -31,13 +31,18 @@ class TestModelRegistry(unittest.TestCase):
         ir_models = list_available_models(RiskFactorType.INTEREST_RATE)
         self.assertIn("lgm", ir_models)
         self.assertIn("hull_white", ir_models)
+        self.assertIn("hull_white_1f", ir_models)
         self.assertIn("vasicek", ir_models)
         self.assertIn("cir", ir_models)
+        self.assertIn("cir_ir", ir_models)
+        self.assertIn("cox_ingersoll_ross", ir_models)
 
     def test_registered_credit_models(self) -> None:
         """Verify default credit models are registered."""
         credit_models = list_available_models(RiskFactorType.CREDIT)
         self.assertIn("cir", credit_models)
+        self.assertIn("cir_hazard_rate", credit_models)
+        self.assertIn("cox_ingersoll_ross", credit_models)
 
     def test_registered_fx_models(self) -> None:
         """Verify default FX models are registered."""
@@ -51,6 +56,7 @@ class TestModelRegistry(unittest.TestCase):
         inf_models = list_available_models(RiskFactorType.INFLATION)
         self.assertIn("jarrow_yildirim", inf_models)
         self.assertIn("black", inf_models)
+        self.assertIn("black_inflation", inf_models)
 
     def test_list_all_models(self) -> None:
         """Verify list_available_models with None returns all model names."""

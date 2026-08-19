@@ -16,26 +16,39 @@ compatibility with legacy parameter dataclasses (:class:`LGMParams`,
 
 Public API
 ----------
+- :class:`PricingResult` — result container supporting dictionary and attribute access.
 - :class:`LGMParams` — single-currency calibrated LGM parameters (re-exported).
 - :class:`FXLGMParams` — two-currency + FX spot model parameters.
 - :class:`OptionType` — enumeration of supported option types.
 - :class:`SwapLegType` — enumeration of supported swap leg types.
-- :func:`calibrate_ir_model_to_swaptions` (alias ``calibrate_lgm_to_swaptions``) —
-  calibrate interest rate model ``σ(t)`` to swaptions.
+- :func:`calibrate_ir_model_to_swaptions` (alias
+  ``calibrate_lgm_to_swaptions``) — calibrate interest rate model ``σ(t)`` to swaptions.
 - :func:`price_foreign_exchange_forward` (alias ``price_fx_forward``) —
   price a currency forward.
+- :func:`benchmark_price_foreign_exchange_forward`
+  (alias ``benchmark_price_fx_forward``) — closed-form forward price.
 - :func:`price_foreign_exchange_option` (alias ``price_fx_option``) —
   price a European currency option.
+- :func:`benchmark_price_foreign_exchange_option`
+  (alias ``benchmark_price_fx_option``) — analytical option benchmark.
 - :func:`price_interest_rate_swap` (alias ``price_irs``) —
   price single-currency IRS.
+- :func:`benchmark_price_interest_rate_swap` (alias ``benchmark_price_irs``) —
+  analytical IRS benchmark.
 - :func:`price_cross_currency_swap` (alias ``price_xccy_swap``) —
   price cross-currency swap.
+- :func:`benchmark_price_cross_currency_swap` (alias
+  ``benchmark_price_xccy_swap``) — analytical XCCY benchmark.
 - :func:`price_zero_coupon_inflation_swap` —
   price zero-coupon inflation swaps.
+- :func:`benchmark_price_zero_coupon_inflation_swap` —
+  analytical ZCIS benchmark.
 - :func:`price_year_on_year_inflation_swap` (alias
   ``price_yoy_inflation_swap``) — price year-on-year inflation swaps.
 - :func:`price_consumer_price_index_option` (alias ``price_cpi_option``) —
   price European CPI index options / inflation caps & floors.
+- :func:`benchmark_price_consumer_price_index_option`
+  (alias ``benchmark_price_cpi_option``) — analytical CPI option benchmark.
 
 Units & Conventions
 -------------------
@@ -54,6 +67,11 @@ from scipy.optimize import brentq
 from scipy.stats import norm
 
 from .models.base import FXModel, InflationModel, InterestRateModel
+from .models.fx.garman_kohlhagen import (
+    GarmanKohlhagenFXModel,
+    GarmanKohlhagenParams,
+)
+from .models.fx.heston import HestonFXModel, HestonFXParams
 from .models.fx.two_currency import TwoCurrencyFXModel
 from .models.inflation.black_inflation import BlackInflationModel
 from .models.inflation.jarrow_yildirim import JarrowYildirimModel
@@ -64,6 +82,7 @@ __all__ = [
     "FXLGMParams",
     "LGMParams",
     "OptionType",
+    "PricingResult",
     "SwapLegType",
     "benchmark_price_consumer_price_index_option",
     "benchmark_price_cpi_option",
@@ -144,24 +163,112 @@ class SwapLegType(enum.Enum):
 
 
 # ---------------------------------------------------------------------------
+# Result Containers
+# ---------------------------------------------------------------------------
+
+
+class PricingResult(dict[str, typing.Any]):
+    """Production derivative pricing result container with dict and attribute access.
+
+    Supports:
+    - Standard dict indexing: ``res["price"]``, ``res["std_error"]``
+    - Direct attribute access: ``res.price``, ``res.std_error``,
+      ``res.analytical_benchmark_price``
+    - Formatted string representation for interactive REPL & logging
+    """
+
+    def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
+        super().__init__(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> typing.Any:
+        if name in self:
+            return self[name]
+        msg = f"'{self.__class__.__name__}' object has no attribute {name!r}"
+        raise AttributeError(msg)
+
+    def __setattr__(self, name: str, value: typing.Any) -> None:
+        self[name] = value
+
+    def __delattr__(self, name: str) -> None:
+        if name in self:
+            del self[name]
+        else:
+            msg = f"'{self.__class__.__name__}' object has no attribute {name!r}"
+            raise AttributeError(msg)
+
+    @property
+    def price(self) -> float:
+        """The computed derivative price / PV."""
+        return float(self["price"])
+
+    @property
+    def std_error(self) -> float | None:
+        """Monte Carlo standard error if computed, else None."""
+        val = self.get("std_error")
+        return float(val) if val is not None else None
+
+    @property
+    def analytical_benchmark_price(self) -> float | None:
+        """Analytical benchmark price if available, else None."""
+        val = self.get("analytical_benchmark_price")
+        return float(val) if val is not None else None
+
+    def __repr__(self) -> str:
+        items = []
+        for k, v in self.items():
+            if isinstance(v, float):
+                items.append(f"{k}={v:,.6g}")
+            elif isinstance(v, np.ndarray):
+                items.append(f"{k}=ndarray(shape={v.shape})")
+            else:
+                items.append(f"{k}={v!r}")
+        return f"PricingResult({', '.join(items)})"
+
+
+# ---------------------------------------------------------------------------
 # Internal Model Resolution Helpers
 # ---------------------------------------------------------------------------
 
 
-def _resolve_fx_model(params: FXModel | FXLGMParams) -> FXModel:
-    """Resolve an FXModel or convert legacy FXLGMParams into TwoCurrencyFXModel."""
-    if isinstance(params, FXModel):
-        return params
-    elif isinstance(params, FXLGMParams):
+def _resolve_fx_model(
+    model: (
+        FXModel
+        | FXLGMParams
+        | GarmanKohlhagenParams
+        | HestonFXParams
+        | None
+    ) = None,
+    params: (
+        FXModel
+        | FXLGMParams
+        | GarmanKohlhagenParams
+        | HestonFXParams
+        | None
+    ) = None,
+) -> FXModel:
+    """Resolve an FXModel or convert legacy FXLGMParams / parameter dataclasses."""
+    target = model if model is not None else params
+    if target is None:
+        raise ValueError("Must provide 'model' (or 'params').")
+    if isinstance(target, FXModel):
+        return target
+    elif isinstance(target, FXLGMParams):
         return TwoCurrencyFXModel.from_ir_models(
-            domestic=params.domestic,
-            foreign=params.foreign,
-            spot_fx=params.spot_fx,
-            fx_vol_ann=params.fx_vol_ann,
-            correlation_matrix=params.correlation_matrix,
+            domestic=target.domestic,
+            foreign=target.foreign,
+            spot_fx=target.spot_fx,
+            fx_vol_ann=target.fx_vol_ann,
+            correlation_matrix=target.correlation_matrix,
         )
+    elif isinstance(target, GarmanKohlhagenParams):
+        return GarmanKohlhagenFXModel.from_params(target)
+    elif isinstance(target, HestonFXParams):
+        return HestonFXModel.from_params(target)
     else:
-        msg = f"params must be FXModel or FXLGMParams, got {type(params).__name__}"
+        msg = (
+            f"model must be FXModel or FX parameters dataclass, "
+            f"got {type(target).__name__}"
+        )
         raise TypeError(msg)
 
 
@@ -547,49 +654,68 @@ def _instantaneous_forward(
 
 
 def benchmark_price_foreign_exchange_forward(
-    params: FXLGMParams | FXModel,
-    strike: float,
-    maturity_yrs: float,
-    notional: float,
-) -> dict[str, float]:
+    model: (
+        FXModel
+        | FXLGMParams
+        | GarmanKohlhagenParams
+        | HestonFXParams
+        | None
+    ) = None,
+    strike: float = 1.0,
+    maturity_yrs: float = 1.0,
+    notional: float = 1.0,
+    *,
+    params: (
+        FXModel
+        | FXLGMParams
+        | GarmanKohlhagenParams
+        | HestonFXParams
+        | None
+    ) = None,
+) -> PricingResult:
     """Analytical benchmark pricing for currency forwards via Covered Interest Parity.
 
     Args:
-        params: Foreign exchange model, either an instantiated
+        model: Foreign exchange model, either an instantiated
             :class:`~xvasim.models.base.FXModel` or legacy :class:`FXLGMParams`.
         strike: Forward strike (domestic per foreign).
         maturity_yrs: Maturity in years.
         notional: Notional amount in foreign currency.
+        params: Backwards-compatible alias for *model*.
 
     Returns:
-        Dictionary with ``"price"``, ``"forward_fx"``, ``"domestic_df"``,
+        :class:`PricingResult` with ``"price"``, ``"forward_fx"``, ``"domestic_df"``,
         and ``"foreign_df"``.
     """
-    model = _resolve_fx_model(params)
+    fx_model = _resolve_fx_model(model=model, params=params)
 
-    if isinstance(model, TwoCurrencyFXModel):
-        df_d = float(model.domestic_ir_model.interpolate_discount_factor(maturity_yrs))
-        df_f = float(model.foreign_ir_model.interpolate_discount_factor(maturity_yrs))
-        spot = float(model.spot_fx)
-    elif hasattr(model, "domestic_discount_factor") and hasattr(
-        model, "foreign_discount_factor"
+    if isinstance(fx_model, TwoCurrencyFXModel):
+        df_d = float(
+            fx_model.domestic_ir_model.interpolate_discount_factor(maturity_yrs)
+        )
+        df_f = float(
+            fx_model.foreign_ir_model.interpolate_discount_factor(maturity_yrs)
+        )
+        spot = float(fx_model.spot_fx)
+    elif hasattr(fx_model, "domestic_discount_factor") and hasattr(
+        fx_model, "foreign_discount_factor"
     ):
-        df_d = float(model.domestic_discount_factor(maturity_yrs))
-        df_f = float(model.foreign_discount_factor(maturity_yrs))
-        spot = float(getattr(model, "spot_fx", 1.0))
+        df_d = float(fx_model.domestic_discount_factor(maturity_yrs))
+        df_f = float(fx_model.foreign_discount_factor(maturity_yrs))
+        spot = float(getattr(fx_model, "spot_fx", 1.0))
     else:
         df_d = 1.0
         df_f = 1.0
-        spot = float(getattr(model, "spot_fx", 1.0))
+        spot = float(getattr(fx_model, "spot_fx", 1.0))
 
     fwd_fx = spot * (df_f / max(df_d, 1e-18))
     price = notional * (fwd_fx - strike) * df_d
-    return {
-        "price": float(price),
-        "forward_fx": float(fwd_fx),
-        "domestic_df": float(df_d),
-        "foreign_df": float(df_f),
-    }
+    return PricingResult(
+        price=float(price),
+        forward_fx=float(fwd_fx),
+        domestic_df=float(df_d),
+        foreign_df=float(df_f),
+    )
 
 
 # Convenience alias for foreign exchange forward benchmark pricing
@@ -597,23 +723,37 @@ benchmark_price_fx_forward = benchmark_price_foreign_exchange_forward
 
 
 def price_foreign_exchange_forward(
-    params: FXLGMParams | FXModel,
-    strike: float,
-    maturity_yrs: float,
-    notional: float,
+    model: (
+        FXModel
+        | FXLGMParams
+        | GarmanKohlhagenParams
+        | HestonFXParams
+        | None
+    ) = None,
+    strike: float = 1.0,
+    maturity_yrs: float = 1.0,
+    notional: float = 1.0,
     n_paths: int = 100_000,
     n_steps: int = 100,
     seed: int | None = 42,
     random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
     scramble: bool = True,
-) -> dict[str, float | np.ndarray]:
+    *,
+    params: (
+        FXModel
+        | FXLGMParams
+        | GarmanKohlhagenParams
+        | HestonFXParams
+        | None
+    ) = None,
+) -> PricingResult:
     """Price a currency forward via Monte Carlo under any modular FX model.
 
     The forward buyer receives ``N × (S(T) − K)`` at maturity *T*, discounted
     to today using the domestic bank account.
 
     Args:
-        params: Foreign exchange model, either an instantiated
+        model: Foreign exchange model, either an instantiated
             :class:`~xvasim.models.base.FXModel` or legacy :class:`FXLGMParams`.
         strike: Forward strike (domestic per foreign).
         maturity_yrs: Maturity in years.
@@ -623,19 +763,20 @@ def price_foreign_exchange_forward(
         seed: Random seed (``None`` for non-deterministic).
         random_type: Sequence type (:class:`RandomSequenceType` or str).
         scramble: If True, applies scrambling to QMC sequences.
+        params: Backwards-compatible alias for *model*.
 
     Returns:
-        Dictionary with keys:
+        :class:`PricingResult` with keys:
 
         - ``"price"`` — MC forward value (domestic currency).
         - ``"std_error"`` — standard error of the MC estimate.
         - ``"analytical_benchmark_price"`` — exact analytical benchmark price.
         - ``"fx_terminal"`` — 1-D array of terminal FX rates.
     """
-    model = _resolve_fx_model(params)
+    fx_model = _resolve_fx_model(model=model, params=params)
 
-    if isinstance(model, TwoCurrencyFXModel):
-        times, x_dom, _x_for, fx_paths = model.simulate_paths(
+    if isinstance(fx_model, TwoCurrencyFXModel):
+        times, x_dom, _x_for, fx_paths = fx_model.simulate_paths(
             maturity_yrs,
             n_paths,
             n_steps,
@@ -644,10 +785,10 @@ def price_foreign_exchange_forward(
             scramble=scramble,
         )
         s_t = fx_paths[:, -1]
-        dom_df = model.domestic_ir_model.discount_path(times, x_dom)
+        dom_df = fx_model.domestic_ir_model.discount_path(times, x_dom)
         df_t = dom_df[:, -1]
     else:
-        sim_res = model.simulate_paths(
+        sim_res = fx_model.simulate_paths(
             maturity_yrs,
             n_paths,
             n_steps,
@@ -657,8 +798,8 @@ def price_foreign_exchange_forward(
         )
         fx_paths = sim_res[-1] if isinstance(sim_res, tuple) else sim_res
         s_t = fx_paths[:, -1]
-        if hasattr(model, "domestic_discount_factor"):
-            df_val = float(model.domestic_discount_factor(maturity_yrs))
+        if hasattr(fx_model, "domestic_discount_factor"):
+            df_val = float(fx_model.domestic_discount_factor(maturity_yrs))
             df_t = np.full(n_paths, df_val, dtype=np.float64)
         else:
             df_t = np.ones(n_paths, dtype=np.float64)
@@ -668,18 +809,18 @@ def price_foreign_exchange_forward(
     std_error = float(np.std(payoff) / np.sqrt(n_paths))
 
     ana_res = benchmark_price_foreign_exchange_forward(
-        params=params,
+        model=fx_model,
         strike=strike,
         maturity_yrs=maturity_yrs,
         notional=notional,
     )
 
-    return {
-        "price": price,
-        "std_error": std_error,
-        "analytical_benchmark_price": ana_res["price"],
-        "fx_terminal": s_t,
-    }
+    return PricingResult(
+        price=price,
+        std_error=std_error,
+        analytical_benchmark_price=ana_res["price"],
+        fx_terminal=s_t,
+    )
 
 
 # Convenience alias for foreign exchange forward pricing
@@ -687,12 +828,26 @@ price_fx_forward = price_foreign_exchange_forward
 
 
 def benchmark_price_foreign_exchange_option(
-    params: FXLGMParams | FXModel,
-    strike: float,
-    maturity_yrs: float,
-    notional: float,
+    model: (
+        FXModel
+        | FXLGMParams
+        | GarmanKohlhagenParams
+        | HestonFXParams
+        | None
+    ) = None,
+    strike: float = 1.0,
+    maturity_yrs: float = 1.0,
+    notional: float = 1.0,
     option_type: OptionType | str = OptionType.CALL,
-) -> dict[str, float]:
+    *,
+    params: (
+        FXModel
+        | FXLGMParams
+        | GarmanKohlhagenParams
+        | HestonFXParams
+        | None
+    ) = None,
+) -> PricingResult:
     r"""Analytical benchmark pricing for European currency options.
 
     Supports analytical closed-form evaluation under any FX model with analytical
@@ -700,15 +855,16 @@ def benchmark_price_foreign_exchange_option(
     Two-Currency lognormal spot diffusion).
 
     Args:
-        params: Foreign exchange model, either an instantiated
+        model: Foreign exchange model, either an instantiated
             :class:`~xvasim.models.base.FXModel` or legacy :class:`FXLGMParams`.
         strike: Option strike (domestic per foreign).
         maturity_yrs: Expiry in years.
         notional: Notional in foreign currency.
         option_type: :class:`OptionType` member or string (``'call'`` / ``'put'``).
+        params: Backwards-compatible alias for *model*.
 
     Returns:
-        Dictionary containing benchmark ``"price"`` and diagnostics.
+        :class:`PricingResult` containing benchmark ``"price"`` and diagnostics.
     """
     if isinstance(option_type, str):
         try:
@@ -729,38 +885,42 @@ def benchmark_price_foreign_exchange_option(
         raise TypeError(msg)
 
     is_call = resolved is OptionType.CALL
-    model = _resolve_fx_model(params)
+    fx_model = _resolve_fx_model(model=model, params=params)
 
-    if hasattr(model, "price_option_analytical"):
-        res = model.price_option_analytical(
+    if hasattr(fx_model, "price_option_analytical"):
+        res = fx_model.price_option_analytical(
             strike=strike,
             maturity_yrs=maturity_yrs,
             notional=notional,
             option_type=resolved,
         )
         if isinstance(res, dict):
-            return {k: float(v) for k, v in res.items()}
-        return {"price": float(res)}
+            return PricingResult({k: float(v) for k, v in res.items()})
+        return PricingResult(price=float(res))
 
-    if hasattr(model, "closed_form_option_price"):
+    if hasattr(fx_model, "closed_form_option_price"):
         opt_str = (
             resolved.value
             if isinstance(resolved, OptionType)
             else str(resolved).lower()
         )
-        res_val = model.closed_form_option_price(
+        res_val = fx_model.closed_form_option_price(
             strike=strike,
             maturity_yrs=maturity_yrs,
             option_type=opt_str,
             notional=notional,
         )
-        return {"price": float(res_val)}
+        return PricingResult(price=float(res_val))
 
-    if isinstance(model, TwoCurrencyFXModel):
-        df_d = float(model.domestic_ir_model.interpolate_discount_factor(maturity_yrs))
-        df_f = float(model.foreign_ir_model.interpolate_discount_factor(maturity_yrs))
-        spot = float(model.spot_fx)
-        vol = float(model.fx_vol_ann)
+    if isinstance(fx_model, TwoCurrencyFXModel):
+        df_d = float(
+            fx_model.domestic_ir_model.interpolate_discount_factor(maturity_yrs)
+        )
+        df_f = float(
+            fx_model.foreign_ir_model.interpolate_discount_factor(maturity_yrs)
+        )
+        spot = float(fx_model.spot_fx)
+        vol = float(fx_model.fx_vol_ann)
 
         fwd_fx = spot * (df_f / max(df_d, 1e-18))
         total_std = vol * np.sqrt(maturity_yrs)
@@ -768,10 +928,10 @@ def benchmark_price_foreign_exchange_option(
             intrinsic = (
                 max(fwd_fx - strike, 0.0) if is_call else max(strike - fwd_fx, 0.0)
             )
-            return {
-                "price": float(notional * df_d * intrinsic),
-                "forward_fx": float(fwd_fx),
-            }
+            return PricingResult(
+                price=float(notional * df_d * intrinsic),
+                forward_fx=float(fwd_fx),
+            )
 
         d1 = (np.log(fwd_fx / strike) + 0.5 * vol * vol * maturity_yrs) / total_std
         d2 = d1 - total_std
@@ -788,9 +948,9 @@ def benchmark_price_foreign_exchange_option(
                 * (strike * float(norm.cdf(-d2)) - fwd_fx * float(norm.cdf(-d1)))
             )
 
-        return {"price": float(pv), "forward_fx": float(fwd_fx)}
+        return PricingResult(price=float(pv), forward_fx=float(fwd_fx))
 
-    msg = f"Analytical benchmark not supported for {type(model).__name__}"
+    msg = f"Analytical benchmark not supported for {type(fx_model).__name__}"
     raise TypeError(msg)
 
 
@@ -799,17 +959,31 @@ benchmark_price_fx_option = benchmark_price_foreign_exchange_option
 
 
 def price_foreign_exchange_option(
-    params: FXLGMParams | FXModel,
-    strike: float,
-    maturity_yrs: float,
-    notional: float,
+    model: (
+        FXModel
+        | FXLGMParams
+        | GarmanKohlhagenParams
+        | HestonFXParams
+        | None
+    ) = None,
+    strike: float = 1.0,
+    maturity_yrs: float = 1.0,
+    notional: float = 1.0,
     option_type: OptionType | str = OptionType.CALL,
     n_paths: int = 100_000,
     n_steps: int = 100,
     seed: int | None = 42,
     random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
     scramble: bool = True,
-) -> dict[str, float | np.ndarray]:
+    *,
+    params: (
+        FXModel
+        | FXLGMParams
+        | GarmanKohlhagenParams
+        | HestonFXParams
+        | None
+    ) = None,
+) -> PricingResult:
     r"""Price a European currency option via Monte Carlo under any modular FX model.
 
     Payoffs:
@@ -818,7 +992,7 @@ def price_foreign_exchange_option(
     - **Put**: :math:`N \times \max(K - S(T),\; 0)`
 
     Args:
-        params: Foreign exchange model, either an instantiated
+        model: Foreign exchange model, either an instantiated
             :class:`~xvasim.models.base.FXModel` or legacy :class:`FXLGMParams`.
         strike: Option strike (domestic per foreign).
         maturity_yrs: Expiry in years.
@@ -831,9 +1005,10 @@ def price_foreign_exchange_option(
         seed: Random seed.
         random_type: Random sequence type (:class:`RandomSequenceType` or str).
         scramble: If True, applies scrambling to QMC sequences.
+        params: Backwards-compatible alias for *model*.
 
     Returns:
-        Dictionary with keys:
+        :class:`PricingResult` with keys:
 
         - ``"price"`` — MC option premium (domestic currency).
         - ``"std_error"`` — standard error of the MC estimate.
@@ -862,10 +1037,10 @@ def price_foreign_exchange_option(
         )
         raise TypeError(msg)
 
-    model = _resolve_fx_model(params)
+    fx_model = _resolve_fx_model(model=model, params=params)
 
-    if isinstance(model, TwoCurrencyFXModel):
-        times, x_dom, _x_for, fx_paths = model.simulate_paths(
+    if isinstance(fx_model, TwoCurrencyFXModel):
+        times, x_dom, _x_for, fx_paths = fx_model.simulate_paths(
             maturity_yrs,
             n_paths,
             n_steps,
@@ -874,10 +1049,10 @@ def price_foreign_exchange_option(
             scramble=scramble,
         )
         s_t = fx_paths[:, -1]
-        dom_df = model.domestic_ir_model.discount_path(times, x_dom)
+        dom_df = fx_model.domestic_ir_model.discount_path(times, x_dom)
         df_t = dom_df[:, -1]
     else:
-        sim_res = model.simulate_paths(
+        sim_res = fx_model.simulate_paths(
             maturity_yrs,
             n_paths,
             n_steps,
@@ -887,8 +1062,8 @@ def price_foreign_exchange_option(
         )
         fx_paths = sim_res[-1] if isinstance(sim_res, tuple) else sim_res
         s_t = fx_paths[:, -1]
-        if hasattr(model, "domestic_discount_factor"):
-            df_val = float(model.domestic_discount_factor(maturity_yrs))
+        if hasattr(fx_model, "domestic_discount_factor"):
+            df_val = float(fx_model.domestic_discount_factor(maturity_yrs))
             df_t = np.full(n_paths, df_val, dtype=np.float64)
         else:
             df_t = np.ones(n_paths, dtype=np.float64)
@@ -904,7 +1079,7 @@ def price_foreign_exchange_option(
 
     try:
         ana_res = benchmark_price_foreign_exchange_option(
-            params=params,
+            model=fx_model,
             strike=strike,
             maturity_yrs=maturity_yrs,
             notional=notional,
@@ -922,7 +1097,7 @@ def price_foreign_exchange_option(
     if ana_price is not None:
         res_dict["analytical_benchmark_price"] = ana_price
 
-    return res_dict
+    return PricingResult(res_dict)
 
 
 # Convenience alias for foreign exchange option pricing
@@ -930,7 +1105,7 @@ price_fx_option = price_foreign_exchange_option
 
 
 # ---------------------------------------------------------------------------
-# Inflation pricing functions
+# Inflation Pricing Engine
 # ---------------------------------------------------------------------------
 
 
@@ -940,7 +1115,7 @@ def benchmark_price_zero_coupon_inflation_swap(
     maturity_yrs: float,
     notional: float = 1.0,
     is_payer: bool = True,
-) -> dict[str, float]:
+) -> PricingResult:
     """Analytical benchmark pricing for a Zero-Coupon Inflation Swap (ZCIS).
 
     Args:
@@ -951,7 +1126,8 @@ def benchmark_price_zero_coupon_inflation_swap(
         is_payer: If True, pays fixed and receives inflation; if False, receives fixed.
 
     Returns:
-        Dictionary with ``"price"``, ``"fair_swap_rate"``, ``"forward_cpi"``.
+        :class:`PricingResult` with ``"price"``, ``"fair_swap_rate"``,
+        ``"forward_cpi"``.
     """
     if not isinstance(model, InflationModel):
         msg = f"model must be an InflationModel, got {type(model).__name__}"
@@ -971,11 +1147,11 @@ def benchmark_price_zero_coupon_inflation_swap(
     fwd_float_comp = (forward_cpi_val / model.base_cpi) - 1.0
     unit_net = (fwd_float_comp - k_comp) if is_payer else (k_comp - fwd_float_comp)
     price = notional * p_nom * unit_net
-    return {
-        "price": float(price),
-        "fair_swap_rate": float(fair_swap_rate),
-        "forward_cpi": float(forward_cpi_val),
-    }
+    return PricingResult(
+        price=float(price),
+        fair_swap_rate=float(fair_swap_rate),
+        forward_cpi=float(forward_cpi_val),
+    )
 
 
 def price_zero_coupon_inflation_swap(
@@ -989,7 +1165,7 @@ def price_zero_coupon_inflation_swap(
     seed: int | None = None,
     random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
     scramble: bool = True,
-) -> dict[str, float]:
+) -> PricingResult:
     """Price a Zero-Coupon Inflation Swap (ZCIS) via Monte Carlo simulation.
 
     In a zero-coupon inflation swap with maturity :math:`T`:
@@ -1012,7 +1188,7 @@ def price_zero_coupon_inflation_swap(
         scramble: If True, applies scrambling to QMC sequences.
 
     Returns:
-        Dictionary with ``price``, ``fair_swap_rate``, ``forward_cpi``,
+        :class:`PricingResult` with ``price``, ``fair_swap_rate``, ``forward_cpi``,
         ``analytical_benchmark_price``, and optionally ``std_error`` (for Monte Carlo).
     """
     if not isinstance(model, InflationModel):
@@ -1051,13 +1227,13 @@ def price_zero_coupon_inflation_swap(
     price = float(np.mean(pv_paths))
     std_error = float(np.std(pv_paths) / np.sqrt(n_paths))
 
-    return {
-        "price": price,
-        "std_error": std_error,
-        "analytical_benchmark_price": ana_res["price"],
-        "fair_swap_rate": ana_res["fair_swap_rate"],
-        "forward_cpi": ana_res["forward_cpi"],
-    }
+    return PricingResult(
+        price=price,
+        std_error=std_error,
+        analytical_benchmark_price=ana_res["price"],
+        fair_swap_rate=ana_res["fair_swap_rate"],
+        forward_cpi=ana_res["forward_cpi"],
+    )
 
 
 def price_year_on_year_inflation_swap(
@@ -1071,7 +1247,7 @@ def price_year_on_year_inflation_swap(
     seed: int | None = None,
     random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
     scramble: bool = True,
-) -> dict[str, typing.Any]:
+) -> PricingResult:
     """Price a Year-on-Year (YoY) Inflation Swap via Monte Carlo simulation.
 
     For each period :math:`[t_{i-1}, t_i]`:
@@ -1092,7 +1268,7 @@ def price_year_on_year_inflation_swap(
         scramble: If True, applies scrambling to QMC sequences.
 
     Returns:
-        Dictionary with ``price``, ``std_error``, and ``period_cash_flows``.
+        :class:`PricingResult` with ``price``, ``std_error``, and ``period_cash_flows``.
     """
     if not isinstance(model, InflationModel):
         msg = f"model must be an InflationModel, got {type(model).__name__}"
@@ -1100,7 +1276,7 @@ def price_year_on_year_inflation_swap(
 
     pay_times = np.sort(np.asarray(payment_times_yrs, dtype=np.float64))
     if len(pay_times) == 0:
-        return {"price": 0.0, "std_error": 0.0, "period_cash_flows": []}
+        return PricingResult(price=0.0, std_error=0.0, period_cash_flows=[])
 
     maturity_yrs = float(pay_times[-1])
     n_steps = max(int(np.ceil(maturity_yrs * n_steps_per_year)), len(pay_times))
@@ -1148,11 +1324,11 @@ def price_year_on_year_inflation_swap(
     price = float(np.mean(total_pv_paths))
     std_error = float(np.std(total_pv_paths) / np.sqrt(n_paths))
 
-    return {
-        "price": price,
-        "std_error": std_error,
-        "period_cash_flows": period_pvs,
-    }
+    return PricingResult(
+        price=price,
+        std_error=std_error,
+        period_cash_flows=period_pvs,
+    )
 
 
 # Convenience alias for year-on-year inflation swap pricing
@@ -1165,7 +1341,7 @@ def benchmark_price_consumer_price_index_option(
     maturity_yrs: float,
     notional: float = 1.0,
     option_type: OptionType | str = OptionType.CALL,
-) -> dict[str, float]:
+) -> PricingResult:
     """Analytical benchmark pricing for a European Zero-Coupon CPI Option.
 
     Args:
@@ -1176,7 +1352,7 @@ def benchmark_price_consumer_price_index_option(
         option_type: :class:`OptionType` or string (``'call'`` / ``'put'``).
 
     Returns:
-        Dictionary with ``"price"`` and ``"forward_cpi"``.
+        :class:`PricingResult` with ``"price"`` and ``"forward_cpi"``.
     """
     if not isinstance(model, InflationModel):
         msg = f"model must be an InflationModel, got {type(model).__name__}"
@@ -1212,7 +1388,7 @@ def benchmark_price_consumer_price_index_option(
             notional=notional,
             is_call=is_call,
         )
-        return {"price": price_val, "forward_cpi": float(forward_cpi_val)}
+        return PricingResult(price=price_val, forward_cpi=float(forward_cpi_val))
 
     if isinstance(model, JarrowYildirimModel):
         p_nom = float(model.nominal_ir_model.interpolate_discount_factor(maturity_yrs))
@@ -1225,10 +1401,10 @@ def benchmark_price_consumer_price_index_option(
                 if is_call
                 else max(k_comp - fwd_ratio, 0.0)
             )
-            return {
-                "price": float(notional * p_nom * intrinsic),
-                "forward_cpi": float(forward_cpi_val),
-            }
+            return PricingResult(
+                price=float(notional * p_nom * intrinsic),
+                forward_cpi=float(forward_cpi_val),
+            )
 
         d1 = (np.log(fwd_ratio / k_comp) + 0.5 * tot_var) / total_std
         d2 = d1 - total_std
@@ -1241,10 +1417,10 @@ def benchmark_price_consumer_price_index_option(
             pv = p_nom * (
                 k_comp * float(norm.cdf(-d2)) - fwd_ratio * float(norm.cdf(-d1))
             )
-        return {
-            "price": float(notional * pv),
-            "forward_cpi": float(forward_cpi_val),
-        }
+        return PricingResult(
+            price=float(notional * pv),
+            forward_cpi=float(forward_cpi_val),
+        )
 
     p_nom = (
         float(model.interpolate_nominal_df(maturity_yrs))
@@ -1254,10 +1430,10 @@ def benchmark_price_consumer_price_index_option(
     intrinsic = (
         max(fwd_ratio - k_comp, 0.0) if is_call else max(k_comp - fwd_ratio, 0.0)
     )
-    return {
-        "price": float(notional * p_nom * intrinsic),
-        "forward_cpi": float(forward_cpi_val),
-    }
+    return PricingResult(
+        price=float(notional * p_nom * intrinsic),
+        forward_cpi=float(forward_cpi_val),
+    )
 
 
 # Convenience alias for CPI option benchmark pricing
@@ -1275,7 +1451,7 @@ def price_consumer_price_index_option(
     seed: int | None = None,
     random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
     scramble: bool = True,
-) -> dict[str, float]:
+) -> PricingResult:
     """Price a European Zero-Coupon CPI option via Monte Carlo.
 
     Payoff at maturity :math:`T`:
@@ -1297,7 +1473,7 @@ def price_consumer_price_index_option(
         scramble: If True, applies scrambling to QMC sequences.
 
     Returns:
-        Dictionary containing ``price``, ``std_error`` (for MC),
+        :class:`PricingResult` containing ``price``, ``std_error`` (for MC),
         ``analytical_benchmark_price``, and ``forward_cpi``.
     """
     if not isinstance(model, InflationModel):
@@ -1345,12 +1521,12 @@ def price_consumer_price_index_option(
     price_mc = float(np.mean(payoff))
     std_err = float(np.std(payoff) / np.sqrt(n_paths))
 
-    return {
-        "price": price_mc,
-        "std_error": std_err,
-        "analytical_benchmark_price": ana_res["price"],
-        "forward_cpi": ana_res["forward_cpi"],
-    }
+    return PricingResult(
+        price=price_mc,
+        std_error=std_err,
+        analytical_benchmark_price=ana_res["price"],
+        forward_cpi=ana_res["forward_cpi"],
+    )
 
 
 # Convenience alias for CPI option pricing
@@ -1416,7 +1592,7 @@ def benchmark_price_interest_rate_swap(
     notional: float = 1.0,
     spread_ann: float = 0.0,
     is_payer: bool = True,
-) -> dict[str, typing.Any]:
+) -> PricingResult:
     r"""Analytical closed-form benchmark pricing for a single-currency IRS.
 
     Evaluates the exact present value from the model's initial discount curve.
@@ -1433,7 +1609,7 @@ def benchmark_price_interest_rate_swap(
         is_payer: True for Payer IRS, False for Receiver IRS.
 
     Returns:
-        Dictionary containing analytical ``price``, ``fixed_leg_pv``,
+        :class:`PricingResult` containing analytical ``price``, ``fixed_leg_pv``,
         ``floating_leg_pv``, ``fair_swap_rate``, ``annuity``, and ``period_cash_flows``.
     """
     return price_interest_rate_swap(
@@ -1467,7 +1643,7 @@ def price_interest_rate_swap(
     seed: int | None = None,
     random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
     scramble: bool = True,
-) -> dict[str, typing.Any]:
+) -> PricingResult:
     r"""Price a single-currency vanilla Interest Rate Swap (IRS) under any IR model.
 
     A vanilla IRS exchanges fixed-rate coupon payments for floating-rate
@@ -1503,7 +1679,7 @@ def price_interest_rate_swap(
         scramble: If True, applies scrambling to QMC sequences.
 
     Returns:
-        Dictionary containing:
+        :class:`PricingResult` containing:
 
         - ``"price"`` — Net present value (PV) of the swap.
         - ``"fixed_leg_pv"`` — Present value of the fixed leg.
@@ -1569,15 +1745,15 @@ def price_interest_rate_swap(
 
     # Return pure analytical results if n_paths is None
     if n_paths is None:
-        return {
-            "price": price_analytical,
-            "fixed_leg_pv": fixed_leg_pv_analytical,
-            "floating_leg_pv": float_leg_pv_analytical,
-            "analytical_benchmark_price": price_analytical,
-            "fair_swap_rate": fair_swap_rate,
-            "annuity": annuity,
-            "period_cash_flows": period_cfs,
-        }
+        return PricingResult(
+            price=price_analytical,
+            fixed_leg_pv=fixed_leg_pv_analytical,
+            floating_leg_pv=float_leg_pv_analytical,
+            analytical_benchmark_price=price_analytical,
+            fair_swap_rate=fair_swap_rate,
+            annuity=annuity,
+            period_cash_flows=period_cfs,
+        )
 
     # Monte Carlo pricing
     maturity_yrs = float(t_ends[-1])
@@ -1634,16 +1810,16 @@ def price_interest_rate_swap(
     fixed_leg_pv_mc = float(np.mean(pv_fixed_paths))
     float_leg_pv_mc = float(np.mean(pv_floating_paths))
 
-    return {
-        "price": price_mc,
-        "std_error": std_error,
-        "fixed_leg_pv": fixed_leg_pv_mc,
-        "floating_leg_pv": float_leg_pv_mc,
-        "analytical_benchmark_price": price_analytical,
-        "fair_swap_rate": fair_swap_rate,
-        "annuity": annuity,
-        "period_cash_flows": period_cfs,
-    }
+    return PricingResult(
+        price=price_mc,
+        std_error=std_error,
+        fixed_leg_pv=fixed_leg_pv_mc,
+        floating_leg_pv=float_leg_pv_mc,
+        analytical_benchmark_price=price_analytical,
+        fair_swap_rate=fair_swap_rate,
+        annuity=annuity,
+        period_cash_flows=period_cfs,
+    )
 
 
 # Convenience alias for interest rate swaps
@@ -1665,7 +1841,7 @@ def benchmark_price_cross_currency_swap(
     domestic_notional: float | None = None,
     is_domestic_payer: bool = True,
     exchange_notionals: bool = True,
-) -> dict[str, typing.Any]:
+) -> PricingResult:
     r"""Exact analytical closed-form benchmark pricing for Cross-Currency Swaps.
 
     Evaluates the exact present value and fair rates/spreads from the underlying
@@ -1696,7 +1872,7 @@ def benchmark_price_cross_currency_swap(
             inception (:math:`t=0`) and maturity (:math:`t=T`).
 
     Returns:
-        Dictionary with analytical benchmark results.
+        :class:`PricingResult` with analytical benchmark results.
     """
     return price_cross_currency_swap(
         model=model,
@@ -1741,7 +1917,7 @@ def price_cross_currency_swap(
     seed: int | None = None,
     random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
     scramble: bool = True,
-) -> dict[str, typing.Any]:
+) -> PricingResult:
     r"""Price a Cross-Currency Swap (XCCY) supporting multi-currency rate dynamics.
 
     A cross-currency swap exchanges interest cash flows and principal notionals
@@ -1782,7 +1958,7 @@ def price_cross_currency_swap(
         scramble: If True, applies scrambling to QMC sequences.
 
     Returns:
-        Dictionary containing:
+        :class:`PricingResult` containing:
 
         - ``"price"`` — Net present value in domestic currency.
         - ``"domestic_leg_pv"`` — PV of domestic leg in domestic currency.
@@ -1940,7 +2116,7 @@ def price_cross_currency_swap(
     }
 
     if n_paths is None:
-        return base_result
+        return PricingResult(base_result)
 
     # Monte Carlo simulation
     maturity_yrs = float(t_ends[-1])
@@ -2032,7 +2208,7 @@ def price_cross_currency_swap(
     base_result["notional_exchange_pv"] = float(np.mean(notional_pv_paths))
     base_result["analytical_benchmark_price"] = price_analytical
 
-    return base_result
+    return PricingResult(base_result)
 
 
 # Convenience alias for cross-currency swaps

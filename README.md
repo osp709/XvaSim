@@ -493,7 +493,12 @@ print(f"CPI Caplet Simulated PV: ${cpi_opt['price']:,.2f} (Benchmark: ${cpi_opt[
 
 ```python
 import numpy as np
-from xvasim import compute_cva, compute_marginal_pd, dates_to_years
+from xvasim import (
+    compute_cva,
+    compute_exposure_profile,
+    compute_marginal_pd,
+    dates_to_years,
+)
 
 valuation_date = "2026-07-11"
 dates = ["2027-07-11", "2028-07-11", "2029-07-11", "2031-07-11", "2033-07-11", "2036-07-11"]
@@ -511,7 +516,12 @@ exposure = np.maximum(np.random.normal(loc=50_000.0, scale=15_000.0, size=(n_pat
 discount_factor = np.tile(np.exp(-0.03 * tenors_yrs), (n_paths, 1))
 marginal_pd_matrix = np.tile(marginal_pds, (n_paths, 1))
 
-# 3. Compute Portfolio CVA
+# 3. Compute Exposure Profiles (EE, EPE, PFE percentiles)
+exp_profile = compute_exposure_profile(exposure, percentiles=(95.0, 99.0))
+print(f"Expected Positive Exposure (EPE): ${exp_profile['epe']:,.2f}")
+print(f"Peak Potential Future Exposure (Max PFE): ${exp_profile['max_pfe']:,.2f}")
+
+# 4. Compute Portfolio CVA
 cva = compute_cva(
     exposure=exposure,
     marginal_pd=marginal_pd_matrix,

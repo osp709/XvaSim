@@ -45,6 +45,7 @@ class BlackInflationParams:
 
 
 @ModelRegistry.register("inflation", "black")
+@ModelRegistry.register("inflation", "black_inflation")
 @ModelRegistry.register("inflation", "lognormal")
 class BlackInflationModel(InflationModel):
     """Black log-normal forward CPI inflation model.
@@ -55,16 +56,19 @@ class BlackInflationModel(InflationModel):
 
     def __init__(
         self,
-        nominal_discount_curve_yrs: np.ndarray,
-        nominal_discount_factors: np.ndarray,
-        real_discount_curve_yrs: np.ndarray,
-        real_discount_factors: np.ndarray,
+        params: BlackInflationParams | None = None,
+        *,
+        nominal_discount_curve_yrs: np.ndarray | None = None,
+        nominal_discount_factors: np.ndarray | None = None,
+        real_discount_curve_yrs: np.ndarray | None = None,
+        real_discount_factors: np.ndarray | None = None,
         base_cpi: float = 100.0,
         cpi_vol_ann: float = 0.02,
     ) -> None:
         """Initialize a Black inflation model.
 
         Args:
+            params: Optional :class:`BlackInflationParams` instance.
             nominal_discount_curve_yrs: Tenor pillars for nominal discount curve.
             nominal_discount_factors: Nominal discount factors at tenor pillars.
             real_discount_curve_yrs: Tenor pillars for real discount curve.
@@ -72,19 +76,61 @@ class BlackInflationModel(InflationModel):
             base_cpi: Base Consumer Price Index level I(0) (must be > 0).
             cpi_vol_ann: Annualised log-normal CPI volatility (must be >= 0).
         """
-        if base_cpi <= 0:
-            msg = f"base_cpi must be positive, got {base_cpi}"
-            raise ValueError(msg)
-        if cpi_vol_ann < 0:
-            msg = f"cpi_vol_ann must be non-negative, got {cpi_vol_ann}"
-            raise ValueError(msg)
+        if params is not None:
+            self._params = params
+        else:
+            if (
+                nominal_discount_curve_yrs is None
+                or nominal_discount_factors is None
+                or real_discount_curve_yrs is None
+                or real_discount_factors is None
+            ):
+                msg = (
+                    "Must supply either a BlackInflationParams instance or all of "
+                    "nominal_discount_curve_yrs, nominal_discount_factors, "
+                    "real_discount_curve_yrs, and real_discount_factors."
+                )
+                raise ValueError(msg)
+            if base_cpi <= 0:
+                msg = f"base_cpi must be positive, got {base_cpi}"
+                raise ValueError(msg)
+            if cpi_vol_ann < 0:
+                msg = f"cpi_vol_ann must be non-negative, got {cpi_vol_ann}"
+                raise ValueError(msg)
 
-        self._nom_curve = np.asarray(nominal_discount_curve_yrs, dtype=np.float64)
-        self._nom_dfs = np.asarray(nominal_discount_factors, dtype=np.float64)
-        self._real_curve = np.asarray(real_discount_curve_yrs, dtype=np.float64)
-        self._real_dfs = np.asarray(real_discount_factors, dtype=np.float64)
-        self._base_cpi = float(base_cpi)
-        self._cpi_vol_ann = float(cpi_vol_ann)
+            self._params = BlackInflationParams(
+                nominal_discount_curve_yrs=np.asarray(
+                    nominal_discount_curve_yrs, dtype=np.float64
+                ),
+                nominal_discount_factors=np.asarray(
+                    nominal_discount_factors, dtype=np.float64
+                ),
+                real_discount_curve_yrs=np.asarray(
+                    real_discount_curve_yrs, dtype=np.float64
+                ),
+                real_discount_factors=np.asarray(
+                    real_discount_factors, dtype=np.float64
+                ),
+                base_cpi=float(base_cpi),
+                cpi_vol_ann=float(cpi_vol_ann),
+            )
+
+        self._nom_curve = self._params.nominal_discount_curve_yrs
+        self._nom_dfs = self._params.nominal_discount_factors
+        self._real_curve = self._params.real_discount_curve_yrs
+        self._real_dfs = self._params.real_discount_factors
+        self._base_cpi = self._params.base_cpi
+        self._cpi_vol_ann = self._params.cpi_vol_ann
+
+    @classmethod
+    def from_params(cls, params: BlackInflationParams) -> BlackInflationModel:
+        """Construct a BlackInflationModel from a parameters object."""
+        return cls(params=params)
+
+    @property
+    def params(self) -> BlackInflationParams:
+        """The underlying :class:`BlackInflationParams`."""
+        return self._params
 
     @property
     def model_name(self) -> str:

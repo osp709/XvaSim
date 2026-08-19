@@ -6,6 +6,7 @@ import numpy as np
 
 from xvasim.models.inflation.black_inflation import (
     BlackInflationModel,
+    BlackInflationParams,
 )
 from xvasim.qmc import RandomSequenceType
 
@@ -20,7 +21,7 @@ class TestBlackInflationModel(unittest.TestCase):
         self.base_cpi = 100.0
         self.vol = 0.02
 
-        self.model = BlackInflationModel(
+        self.params = BlackInflationParams(
             nominal_discount_curve_yrs=self.tenors,
             nominal_discount_factors=self.nom_dfs,
             real_discount_curve_yrs=self.tenors,
@@ -28,6 +29,15 @@ class TestBlackInflationModel(unittest.TestCase):
             base_cpi=self.base_cpi,
             cpi_vol_ann=self.vol,
         )
+
+        self.model = BlackInflationModel(params=self.params)
+
+    def test_from_params(self) -> None:
+        """Verify initialization via from_params and properties."""
+        mdl = BlackInflationModel.from_params(self.params)
+        self.assertEqual(mdl.base_cpi, self.base_cpi)
+        self.assertEqual(mdl.cpi_vol_ann, self.vol)
+        self.assertIs(mdl.params, self.params)
 
     def test_init_validation(self) -> None:
         """Invalid base_cpi or cpi_vol_ann raises ValueError."""

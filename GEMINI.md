@@ -16,9 +16,10 @@ This document provides system instructions, architectural context, mathematical 
    - Concrete Credit models: CIR Hazard Rate (`CIRHazardRateModel`).
    - FX models: Two-Currency FX (`TwoCurrencyFXModel`), Garman-Kohlhagen / Black-Scholes (`GarmanKohlhagenFXModel`), Heston Stochastic Volatility (`HestonFXModel`).
    - Inflation models: Jarrow-Yildirim Two-Economy (`JarrowYildirimModel`), Black CPI Forward (`BlackInflationModel`).
-2. **Credit Valuation Adjustment (CVA)** (`xvasim.cva_engine`):
+2. **Credit Valuation Adjustment (CVA) & Exposure Analytics** (`xvasim.cva_engine`):
    - CIR and modular credit model spread calibration (L-BFGS-B).
    - Path-wise Monte Carlo CVA aggregation across exposure paths, discount factors, and marginal default probabilities.
+   - Counterparty exposure profiling: Expected Exposure ($EE$), Expected Positive Exposure ($EPE$), Max PFE, and quantile curves (`compute_exposure_profile`).
 3. **Derivative Pricing Engine** (`xvasim.pricing_engine`):
    - **Primary Monte Carlo Pricers**: All `price_*` functions simulate paths by default, returning simulated price, standard error, and analytical benchmark price. Fully expanded canonical names are standard across all asset classes with backwards-compatible aliases.
    - **Analytical Benchmarks**: Dedicated `benchmark_price_*` functions provide exact closed-form benchmark solutions to validate Monte Carlo simulations.
@@ -79,7 +80,7 @@ XvaSim/
     ├── unit/                   # Isolated unit tests
     │   ├── cva/                # CVA calculation & CIR calibration tests
     │   ├── models/             # Model-specific tests (IR, FX, Credit, Inflation, base, registry)
-    │   ├── pricing/            # Pricing engine tests (IRS, XCCY, FX, Inflation, internals)
+    │   ├── pricing/            # Pricing engine tests (IRS, XCCY, FX, Inflation, internals, PricingResult)
     │   ├── qmc/                # Quasi-Monte Carlo variate & convergence tests
     │   ├── test_backend.py     # Hardware acceleration & tensor backend tests
     │   ├── test_jit.py         # Compiled numerical kernels tests
@@ -234,3 +235,10 @@ To enforce a completely modular, pluggable, and decoupled stochastic model frame
    - Specialized simulation kernels are encapsulated with private implementations (`_cir_simulate_paths_kernel`, `_lgm_simulate_paths_kernel`, `_vasicek_simulate_paths_kernel`, `_hull_white_simulate_paths_kernel`, `_heston_simulate_paths_kernel`).
    - Unified dispatcher: `simulate_model_paths_kernel(model_type, ...)` dynamically routes simulation stepping calls based on model type.
    - Generic credit kernels: `credit_survival_probability_kernel` and `credit_calibration_objective_kernel` (with `cir_*` aliases).
+
+5. **Production Pricing Result & Exposure Analytics (`PricingResult`, `compute_exposure_profile`)**:
+   - `PricingResult`: Subclasses `dict[str, Any]` providing dual-interface access: standard dictionary subscripting (`res["price"]`, `res["std_error"]`) and typed attribute access (`res.price`, `res.std_error`, `res.analytical_benchmark_price`).
+   - Standardized pricing signatures: All pricing functions accept `model: ... | None = None` (or `params` keyword fallback) supporting modular models and legacy parameter dataclasses across all asset classes.
+   - Exposure Profiling: `compute_exposure_profile` calculates Expected Exposure ($EE$), Expected Positive Exposure ($EPE$), Max PFE, and quantile curves.
+   - Universal parameter constructor support: `GarmanKohlhagenFXModel`, `HestonFXModel`, and `BlackInflationModel` accept optional `params` in `__init__`, expose a typed `params` property, and implement `from_params`.
+   - Comprehensive model registry aliases: `hull_white_1f`, `cir_ir`, `cir_hazard_rate`, `black_inflation`, and `cox_ingersoll_ross` registered across IR, Credit, and Inflation.

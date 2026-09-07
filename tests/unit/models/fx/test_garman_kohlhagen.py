@@ -7,7 +7,7 @@ import numpy as np
 from tests.helpers.assertions import assert_put_call_parity
 from xvasim.models.fx.garman_kohlhagen import (
     GarmanKohlhagenFXModel,
-    GarmanKohlhagenParams,
+    GarmanKohlhagenFXParams,
 )
 from xvasim.pricing_engine import OptionType
 from xvasim.qmc import RandomSequenceType
@@ -33,14 +33,14 @@ class TestGarmanKohlhagenFXModel(unittest.TestCase):
             GarmanKohlhagenFXModel(spot_fx=1.15, fx_vol_ann=-0.05)
 
         with self.assertRaises(ValueError):
-            GarmanKohlhagenFXModel(params=GarmanKohlhagenParams(spot_fx=-1.0, fx_vol_ann=0.10))
+            GarmanKohlhagenFXModel(params=GarmanKohlhagenFXParams(spot_fx=-1.0, fx_vol_ann=0.10))
 
         with self.assertRaises(ValueError):
-            GarmanKohlhagenFXModel(params=GarmanKohlhagenParams(spot_fx=1.0, fx_vol_ann=-0.10))
+            GarmanKohlhagenFXModel(params=GarmanKohlhagenFXParams(spot_fx=1.0, fx_vol_ann=-0.10))
 
     def test_from_params(self) -> None:
-        """Verify initialization via GarmanKohlhagenParams."""
-        params = GarmanKohlhagenParams(
+        """Verify initialization via GarmanKohlhagenFXParams."""
+        params = GarmanKohlhagenFXParams(
             spot_fx=1.20,
             fx_vol_ann=0.15,
             domestic_rate_ann=0.04,

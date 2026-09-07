@@ -6,10 +6,13 @@ and a log-normal spot FX process with full 3×3 correlation structure.
 
 Public API
 ----------
+- :class:`TwoCurrencyFXParams` — parameter container for the two-currency FX model.
 - :class:`TwoCurrencyFXModel` — modular two-currency FX model.
 """
 
 from __future__ import annotations
+
+import dataclasses
 
 import numpy as np
 
@@ -17,6 +20,28 @@ from ...qmc import RandomSequenceType, generate_normal_draws
 from ..base import FXModel, InterestRateModel
 from ..ir.lgm import LGMModel, LGMParams
 from ..registry import ModelRegistry
+
+
+@dataclasses.dataclass(frozen=True)
+class TwoCurrencyFXParams:
+    r"""Parameters for the two-currency multi-factor FX model.
+
+    Attributes:
+        domestic_ir_model: Interest rate model (or :class:`LGMParams`) for
+            the domestic (numeraire) currency.
+        foreign_ir_model: Interest rate model (or :class:`LGMParams`) for
+            the foreign currency.
+        spot_fx: Current spot FX rate (units of domestic per 1 foreign).
+        fx_vol_ann: Annualised log-normal FX spot volatility.
+        correlation_matrix: 3×3 correlation matrix ordered as
+            ``[domestic_rate, foreign_rate, fx_spot]``.
+    """
+
+    domestic_ir_model: InterestRateModel | LGMParams
+    foreign_ir_model: InterestRateModel | LGMParams
+    spot_fx: float
+    fx_vol_ann: float
+    correlation_matrix: np.ndarray
 
 
 @ModelRegistry.register("fx", "two_currency")
@@ -62,6 +87,17 @@ class TwoCurrencyFXModel(FXModel):
             )
             raise ValueError(msg)
 
+    @classmethod
+    def from_params(cls, params: TwoCurrencyFXParams) -> TwoCurrencyFXModel:
+        """Construct a TwoCurrencyFXModel from a params object."""
+        return cls(
+            domestic_ir_model=params.domestic_ir_model,
+            foreign_ir_model=params.foreign_ir_model,
+            spot_fx=params.spot_fx,
+            fx_vol_ann=params.fx_vol_ann,
+            correlation_matrix=params.correlation_matrix,
+        )
+
     @property
     def model_name(self) -> str:
         """Returns 'two_currency'."""
@@ -91,6 +127,17 @@ class TwoCurrencyFXModel(FXModel):
     def correlation_matrix(self) -> np.ndarray:
         """3×3 correlation matrix."""
         return self._correlation_matrix
+
+    @property
+    def params(self) -> TwoCurrencyFXParams:
+        """The underlying :class:`TwoCurrencyFXParams`."""
+        return TwoCurrencyFXParams(
+            domestic_ir_model=self._domestic,
+            foreign_ir_model=self._foreign,
+            spot_fx=self._spot_fx,
+            fx_vol_ann=self._fx_vol_ann,
+            correlation_matrix=self._correlation_matrix,
+        )
 
     @classmethod
     def from_ir_models(

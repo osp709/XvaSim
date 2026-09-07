@@ -6,7 +6,7 @@ exchange spot dynamics with continuous domestic and foreign interest rates
 
 Public API
 ----------
-- :class:`GarmanKohlhagenParams` — parameter container for Garman-Kohlhagen model.
+- :class:`GarmanKohlhagenFXParams` — parameter container for Garman-Kohlhagen model.
 - :class:`GarmanKohlhagenFXModel` — Garman-Kohlhagen FX market model class.
 """
 
@@ -24,7 +24,7 @@ from ..registry import ModelRegistry
 
 
 @dataclasses.dataclass(frozen=True)
-class GarmanKohlhagenParams:
+class GarmanKohlhagenFXParams:
     """Parameters for the Garman-Kohlhagen FX model.
 
     Attributes:
@@ -62,7 +62,7 @@ class GarmanKohlhagenFXModel(FXModel):
 
     def __init__(
         self,
-        params: GarmanKohlhagenParams | None = None,
+        params: GarmanKohlhagenFXParams | None = None,
         *,
         spot_fx: float = 1.0,
         fx_vol_ann: float = 0.10,
@@ -76,7 +76,7 @@ class GarmanKohlhagenFXModel(FXModel):
         """Initialize the Garman-Kohlhagen FX model.
 
         Args:
-            params: Optional :class:`GarmanKohlhagenParams` instance.
+            params: Optional :class:`GarmanKohlhagenFXParams` instance.
             spot_fx: Current spot FX rate (units of domestic per 1 foreign).
             fx_vol_ann: Annualised log-normal FX volatility.
             domestic_rate_ann: Constant domestic interest rate (annualised).
@@ -96,7 +96,7 @@ class GarmanKohlhagenFXModel(FXModel):
                 msg = f"fx_vol_ann must be non-negative, got {fx_vol_ann}"
                 raise ValueError(msg)
 
-            self._params = GarmanKohlhagenParams(
+            self._params = GarmanKohlhagenFXParams(
                 spot_fx=spot_fx,
                 fx_vol_ann=fx_vol_ann,
                 domestic_rate_ann=domestic_rate_ann,
@@ -140,13 +140,13 @@ class GarmanKohlhagenFXModel(FXModel):
         self._for_dfs = self._params.discount_factors_foreign
 
     @classmethod
-    def from_params(cls, params: GarmanKohlhagenParams) -> GarmanKohlhagenFXModel:
+    def from_params(cls, params: GarmanKohlhagenFXParams) -> GarmanKohlhagenFXModel:
         """Construct a GarmanKohlhagenFXModel from a parameters object."""
         return cls(params=params)
 
     @property
-    def params(self) -> GarmanKohlhagenParams:
-        """The underlying :class:`GarmanKohlhagenParams`."""
+    def params(self) -> GarmanKohlhagenFXParams:
+        """The underlying :class:`GarmanKohlhagenFXParams`."""
         return self._params
 
     @property

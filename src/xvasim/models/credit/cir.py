@@ -5,7 +5,7 @@ This module implements the CIR default-intensity model as an object-oriented
 
 Public API
 ----------
-- :class:`CIRParams` — CIR credit parameters dataclass (re-exported).
+- :class:`CIRHazardRateParams` — CIR credit parameters dataclass (re-exported).
 - :class:`CIRHazardRateModel` — object-oriented CIR credit model.
 """
 
@@ -25,7 +25,7 @@ from ..registry import ModelRegistry
 
 
 @dataclasses.dataclass(frozen=True)
-class CIRParams:
+class CIRHazardRateParams:
     r"""Calibrated parameters for the Cox-Ingersoll-Ross hazard-rate model.
 
     The CIR process for the default intensity is:
@@ -59,7 +59,7 @@ class CIRHazardRateModel(CreditModel):
 
     def __init__(
         self,
-        params: CIRParams | None = None,
+        params: CIRHazardRateParams | None = None,
         *,
         kappa_ann: float = 0.5,
         theta_ann: float = 0.03,
@@ -70,7 +70,7 @@ class CIRHazardRateModel(CreditModel):
         if params is not None:
             self._params = params
         else:
-            self._params = CIRParams(
+            self._params = CIRHazardRateParams(
                 kappa_ann=kappa_ann,
                 theta_ann=theta_ann,
                 sigma_ann=sigma_ann,
@@ -83,8 +83,8 @@ class CIRHazardRateModel(CreditModel):
         return "cir"
 
     @property
-    def params(self) -> CIRParams:
-        """The underlying :class:`CIRParams`."""
+    def params(self) -> CIRHazardRateParams:
+        """The underlying :class:`CIRHazardRateParams`."""
         return self._params
 
     @property
@@ -165,4 +165,4 @@ class CIRHazardRateModel(CreditModel):
             msg = f"CIR calibration failed: {result.message}"
             raise RuntimeError(msg)
 
-        return cls(params=CIRParams(*result.x))
+        return cls(params=CIRHazardRateParams(*result.x))

@@ -4,7 +4,10 @@ import unittest
 
 import numpy as np
 
-from xvasim.models.fx.two_currency import TwoCurrencyFXModel
+from xvasim.models.fx.two_currency import (
+    TwoCurrencyFXModel,
+    TwoCurrencyFXParams,
+)
 from xvasim.models.ir.hull_white import HullWhite1FModel
 from xvasim.models.ir.lgm import LGMModel, LGMParams
 from xvasim.qmc import RandomSequenceType
@@ -113,6 +116,70 @@ class TestTwoCurrencyFXModel(unittest.TestCase):
         )
         self.assertIs(mdl_comp.domestic_ir_model, self.dom_model)
         self.assertIs(mdl_comp.foreign_ir_model, self.for_model)
+
+    def test_from_params(self) -> None:
+        """Verify construction via TwoCurrencyFXParams and from_params."""
+        params = TwoCurrencyFXParams(
+            domestic_ir_model=self.dom_model,
+            foreign_ir_model=self.for_model,
+            spot_fx=1.20,
+            fx_vol_ann=0.10,
+            correlation_matrix=self.corr,
+        )
+        mdl = TwoCurrencyFXModel.from_params(params)
+        self.assertEqual(mdl.model_name, "two_currency")
+        self.assertEqual(mdl.spot_fx, 1.20)
+        self.assertEqual(mdl.fx_vol_ann, 0.10)
+        self.assertIs(mdl.domestic_ir_model, self.dom_model)
+        self.assertIs(mdl.foreign_ir_model, self.for_model)
+        np.testing.assert_array_equal(mdl.correlation_matrix, self.corr)
+
+        params_rt = mdl.params
+        self.assertIsInstance(params_rt, TwoCurrencyFXParams)
+        self.assertIs(params_rt.domestic_ir_model, self.dom_model)
+        self.assertIs(params_rt.foreign_ir_model, self.for_model)
+        self.assertEqual(params_rt.spot_fx, 1.20)
+        self.assertEqual(params_rt.fx_vol_ann, 0.10)
+        np.testing.assert_array_equal(params_rt.correlation_matrix, self.corr)
+
+    def test_from_params_converts_lgm_params(self) -> None:
+        """LGMParams components are converted to LGMModel instances."""
+        dom_p = LGMParams(
+            kappa_ann=0.03,
+            sigma_grid_yrs=np.array([5.0]),
+            sigma_values_ann=np.array([0.01]),
+            discount_curve_yrs=self.tenors,
+            discount_factors=self.dfs_dom,
+        )
+        for_p = LGMParams(
+            kappa_ann=0.03,
+            sigma_grid_yrs=np.array([5.0]),
+            sigma_values_ann=np.array([0.012]),
+            discount_curve_yrs=self.tenors,
+            discount_factors=self.dfs_for,
+        )
+        params = TwoCurrencyFXParams(
+            domestic_ir_model=dom_p,
+            foreign_ir_model=for_p,
+            spot_fx=1.20,
+            fx_vol_ann=0.10,
+            correlation_matrix=self.corr,
+        )
+        mdl = TwoCurrencyFXModel.from_params(params)
+        self.assertIsInstance(mdl.domestic_ir_model, LGMModel)
+        self.assertIsInstance(mdl.foreign_ir_model, LGMModel)
+
+    def test_from_params_invalid_correlation_raises(self) -> None:
+        """Invalid correlation matrix shape via params raises ValueError."""
+        params = TwoCurrencyFXParams(
+            domestic_ir_model=self.dom_model,
+            foreign_ir_model=self.for_model,
+            spot_fx=1.20,
+            fx_vol_ann=0.10,
+            correlation_matrix=np.eye(2),
+        )
+        with self.assertRaises(ValueError):
+            TwoCurrencyFXModel.from_params(params)
 
     def test_simulate_paths_hw(self) -> None:
         """Verify path simulation with Hull-White interest rate models."""

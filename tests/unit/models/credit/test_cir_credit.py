@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from xvasim.models.credit.cir import CIRHazardRateModel, CIRParams
+from xvasim.models.credit.cir import CIRHazardRateModel, CIRHazardRateParams
 
 
 class TestCIRHazardRateModel(unittest.TestCase):
@@ -19,8 +19,8 @@ class TestCIRHazardRateModel(unittest.TestCase):
         )
 
     def test_init_with_params_dataclass(self) -> None:
-        """Verify model initialization via pre-built CIRParams."""
-        params = CIRParams(
+        """Verify model initialization via pre-built CIRHazardRateParams."""
+        params = CIRHazardRateParams(
             kappa_ann=0.4,
             theta_ann=0.025,
             sigma_ann=0.08,

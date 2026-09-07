@@ -26,10 +26,10 @@ Public API
   - :class:`VasicekModel`, :class:`VasicekParams`
   - :class:`CIRInterestRateModel`, :class:`CIRInterestRateParams`
 - Credit models:
-  - :class:`CIRHazardRateModel`, :class:`CIRParams`
+  - :class:`CIRHazardRateModel`, :class:`CIRHazardRateParams`
 - FX models:
   - :class:`TwoCurrencyFXModel`
-  - :class:`GarmanKohlhagenFXModel`, :class:`GarmanKohlhagenParams`
+  - :class:`GarmanKohlhagenFXModel`, :class:`GarmanKohlhagenFXParams`
   - :class:`HestonFXModel`, :class:`HestonFXParams`
 - Inflation models:
   - :class:`JarrowYildirimModel`, :class:`JarrowYildirimParams`
@@ -47,14 +47,15 @@ from .base import (
 )
 from .credit import (
     CIRHazardRateModel,
-    CIRParams,
+    CIRHazardRateParams,
 )
 from .fx import (
     GarmanKohlhagenFXModel,
-    GarmanKohlhagenParams,
+    GarmanKohlhagenFXParams,
     HestonFXModel,
     HestonFXParams,
     TwoCurrencyFXModel,
+    TwoCurrencyFXParams,
 )
 from .inflation import (
     BlackInflationModel,
@@ -86,13 +87,13 @@ __all__ = [
     "BlackInflationModel",
     "BlackInflationParams",
     "CIRHazardRateModel",
+    "CIRHazardRateParams",
     "CIRInterestRateModel",
     "CIRInterestRateParams",
-    "CIRParams",
     "CreditModel",
     "FXModel",
     "GarmanKohlhagenFXModel",
-    "GarmanKohlhagenParams",
+    "GarmanKohlhagenFXParams",
     "HestonFXModel",
     "HestonFXParams",
     "HullWhite1FModel",
@@ -108,6 +109,7 @@ __all__ = [
     "RiskFactorType",
     "StochasticModel",
     "TwoCurrencyFXModel",
+    "TwoCurrencyFXParams",
     "VasicekModel",
     "VasicekParams",
     "create_credit_model",

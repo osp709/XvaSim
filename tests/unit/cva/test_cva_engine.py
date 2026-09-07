@@ -6,7 +6,7 @@ import unittest
 import numpy as np
 
 from xvasim.cva_engine import (
-    CIRParams,
+    CIRHazardRateParams,
     _calibrate_cir,
     _calibrate_credit_model,
     _cir_survival_probability,
@@ -173,7 +173,7 @@ class TestCvaEngine(unittest.TestCase):
 class TestCirSurvivalProbability(unittest.TestCase):
     """Tests for the CIR survival probability closed-form solution."""
 
-    _DEFAULT_PARAMS = CIRParams(
+    _DEFAULT_PARAMS = CIRHazardRateParams(
         kappa_ann=0.5, theta_ann=0.03, sigma_ann=0.1, lambda_0_ann=0.02
     )
 
@@ -183,7 +183,7 @@ class TestCirSurvivalProbability(unittest.TestCase):
         surv = _cir_survival_probability(tenors_yrs, self._DEFAULT_PARAMS)
         np.testing.assert_allclose(surv, [1.0], atol=1e-10)
 
-        # Test _credit_model_survival_probability with CIRParams and Model
+        # Test _credit_model_survival_probability with CIRHazardRateParams and Model
         surv_gn = _credit_model_survival_probability(tenors_yrs, self._DEFAULT_PARAMS)
         np.testing.assert_allclose(surv_gn, [1.0], atol=1e-10)
 
@@ -210,7 +210,7 @@ class TestCirSurvivalProbability(unittest.TestCase):
         tenors = np.array([1.0, 2.0, 3.0, 5.0])
         spreads = np.array([0.015, 0.018, 0.020, 0.025])
         cal_params = _calibrate_credit_model(spreads, tenors, model_type="cir")
-        self.assertIsInstance(cal_params, CIRParams)
+        self.assertIsInstance(cal_params, CIRHazardRateParams)
 
         cal_alias = _calibrate_cir(spreads, tenors)
         self.assertEqual(cal_params.kappa_ann, cal_alias.kappa_ann)

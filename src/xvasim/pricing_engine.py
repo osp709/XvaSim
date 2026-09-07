@@ -69,7 +69,7 @@ from scipy.stats import norm
 from .models.base import FXModel, InflationModel, InterestRateModel
 from .models.fx.garman_kohlhagen import (
     GarmanKohlhagenFXModel,
-    GarmanKohlhagenParams,
+    GarmanKohlhagenFXParams,
 )
 from .models.fx.heston import HestonFXModel, HestonFXParams
 from .models.fx.two_currency import TwoCurrencyFXModel
@@ -234,14 +234,14 @@ def _resolve_fx_model(
     model: (
         FXModel
         | FXLGMParams
-        | GarmanKohlhagenParams
+        | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
     ) = None,
     params: (
         FXModel
         | FXLGMParams
-        | GarmanKohlhagenParams
+        | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
     ) = None,
@@ -260,7 +260,7 @@ def _resolve_fx_model(
             fx_vol_ann=target.fx_vol_ann,
             correlation_matrix=target.correlation_matrix,
         )
-    elif isinstance(target, GarmanKohlhagenParams):
+    elif isinstance(target, GarmanKohlhagenFXParams):
         return GarmanKohlhagenFXModel.from_params(target)
     elif isinstance(target, HestonFXParams):
         return HestonFXModel.from_params(target)
@@ -657,7 +657,7 @@ def benchmark_price_foreign_exchange_forward(
     model: (
         FXModel
         | FXLGMParams
-        | GarmanKohlhagenParams
+        | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
     ) = None,
@@ -668,7 +668,7 @@ def benchmark_price_foreign_exchange_forward(
     params: (
         FXModel
         | FXLGMParams
-        | GarmanKohlhagenParams
+        | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
     ) = None,
@@ -726,7 +726,7 @@ def price_foreign_exchange_forward(
     model: (
         FXModel
         | FXLGMParams
-        | GarmanKohlhagenParams
+        | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
     ) = None,
@@ -742,7 +742,7 @@ def price_foreign_exchange_forward(
     params: (
         FXModel
         | FXLGMParams
-        | GarmanKohlhagenParams
+        | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
     ) = None,
@@ -831,7 +831,7 @@ def benchmark_price_foreign_exchange_option(
     model: (
         FXModel
         | FXLGMParams
-        | GarmanKohlhagenParams
+        | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
     ) = None,
@@ -843,7 +843,7 @@ def benchmark_price_foreign_exchange_option(
     params: (
         FXModel
         | FXLGMParams
-        | GarmanKohlhagenParams
+        | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
     ) = None,
@@ -962,7 +962,7 @@ def price_foreign_exchange_option(
     model: (
         FXModel
         | FXLGMParams
-        | GarmanKohlhagenParams
+        | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
     ) = None,
@@ -979,7 +979,7 @@ def price_foreign_exchange_option(
     params: (
         FXModel
         | FXLGMParams
-        | GarmanKohlhagenParams
+        | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
     ) = None,

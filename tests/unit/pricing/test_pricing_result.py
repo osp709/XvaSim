@@ -6,7 +6,7 @@ import numpy as np
 
 from xvasim.models.fx.garman_kohlhagen import (
     GarmanKohlhagenFXModel,
-    GarmanKohlhagenParams,
+    GarmanKohlhagenFXParams,
 )
 from xvasim.pricing_engine import (
     OptionType,
@@ -86,7 +86,7 @@ class TestPricerParameterFlexibility(unittest.TestCase):
             domestic_rate_ann=0.03,
             foreign_rate_ann=0.01,
         )
-        self.params = GarmanKohlhagenParams(
+        self.params = GarmanKohlhagenFXParams(
             spot_fx=1.20,
             fx_vol_ann=0.15,
             domestic_rate_ann=0.03,

@@ -8,7 +8,7 @@ Carlo CVA calculation with memory chunking and Numexpr acceleration.
 
 Public API
 ----------
-- :class:`CIRParams` — calibrated CIR model parameters (re-exported).
+- :class:`CIRHazardRateParams` — calibrated CIR model parameters (re-exported).
 - :func:`compute_cva` — path-wise CVA aggregation with numexpr and chunking.
 - :func:`compute_cva_chunked` — generator/iterable streaming CVA aggregation.
 - :func:`compute_exposure_profile` — counterparty EE, EPE, and PFE metrics.
@@ -27,7 +27,7 @@ import typing
 import numpy as np
 
 from .models.base import CreditModel
-from .models.credit.cir import CIRHazardRateModel, CIRParams
+from .models.credit.cir import CIRHazardRateModel, CIRHazardRateParams
 
 try:
     import numexpr as _ne  # type: ignore[import-not-found]
@@ -38,7 +38,7 @@ except Exception:  # pragma: no cover
     _ne = None
 
 __all__ = [
-    "CIRParams",
+    "CIRHazardRateParams",
     "compute_cva",
     "compute_cva_chunked",
     "compute_exposure_profile",
@@ -53,16 +53,18 @@ __all__ = [
 
 def _credit_model_survival_probability(
     tenors_yrs: np.ndarray,
-    params: CIRParams | CreditModel,
+    params: CIRHazardRateParams | CreditModel,
 ) -> np.ndarray:
-    r"""Compute survival probabilities using a CreditModel or CIRParams instance.
+    r"""Compute survival probabilities using a CreditModel or
+    CIRHazardRateParams instance.
 
     .. math::
         P_{\text{surv}}(0, t) = A(t)\,e^{-B(t)\,\lambda_{0,\text{ann}}}
 
     Args:
         tenors_yrs: 1-D array of time points (in years).
-        params: Calibrated :class:`CreditModel` or :class:`CIRParams` instance.
+        params: Calibrated :class:`CreditModel` or
+            :class:`CIRHazardRateParams` instance.
 
     Returns:
         1-D array of survival probabilities at each tenor.
@@ -79,7 +81,7 @@ def _calibrate_credit_model(
     credit_spreads_ann: np.ndarray,
     tenors_yrs: np.ndarray,
     model_type: str = "cir",
-) -> CIRParams:
+) -> CIRHazardRateParams:
     r"""Calibrate a credit model to market credit spreads.
 
     Minimises the sum of squared errors between model-implied credit
@@ -103,7 +105,7 @@ def _calibrate_credit_model(
         model_type: Category of credit model to calibrate (default: ``"cir"``).
 
     Returns:
-        A calibrated model parameters instance (e.g. :class:`CIRParams`).
+        A calibrated model parameters instance (e.g. :class:`CIRHazardRateParams`).
 
     Raises:
         ValueError: If an unsupported *model_type* is specified.

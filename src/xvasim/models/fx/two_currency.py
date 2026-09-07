@@ -52,8 +52,8 @@ class TwoCurrencyFXModel(FXModel):
         else:
             self._foreign = foreign_ir_model
 
-        self._spot_fx = float(spot_fx)
-        self._fx_vol_ann = float(fx_vol_ann)
+        self._spot_fx = spot_fx
+        self._fx_vol_ann = fx_vol_ann
         self._correlation_matrix = np.asarray(correlation_matrix, dtype=np.float64)
 
         if self._correlation_matrix.shape != (3, 3):

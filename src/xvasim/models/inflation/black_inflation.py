@@ -111,8 +111,8 @@ class BlackInflationModel(InflationModel):
                 real_discount_factors=np.asarray(
                     real_discount_factors, dtype=np.float64
                 ),
-                base_cpi=float(base_cpi),
-                cpi_vol_ann=float(cpi_vol_ann),
+                base_cpi=base_cpi,
+                cpi_vol_ann=cpi_vol_ann,
             )
 
         self._nom_curve = self._params.nominal_discount_curve_yrs
@@ -239,7 +239,7 @@ class BlackInflationModel(InflationModel):
         """
         if maturity_yrs <= 0:
             payoff = max(1.0 - (1.0 + strike_rate_ann) ** 0, 0.0) if is_call else 0.0
-            return float(notional * payoff)
+            return notional * payoff
 
         p_nom = float(self.interpolate_nominal_df(maturity_yrs))
         fwd_ratio = self.forward_cpi(maturity_yrs) / self._base_cpi
@@ -252,7 +252,7 @@ class BlackInflationModel(InflationModel):
                 if is_call
                 else max(k_compound - fwd_ratio, 0.0)
             )
-            return float(notional * p_nom * intrinsic)
+            return notional * p_nom * intrinsic
 
         d1 = (np.log(fwd_ratio / k_compound) + 0.5 * total_std**2) / total_std
         d2 = d1 - total_std

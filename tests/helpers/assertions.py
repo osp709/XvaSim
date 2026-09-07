@@ -167,7 +167,7 @@ def assert_path_convergence(
             assert_mc_within_bounds(
                 float(p_arr[i]),
                 float(se_arr[i]),
-                float(benchmark_price),
+                benchmark_price,
                 num_std=num_std,
             )
 

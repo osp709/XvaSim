@@ -209,7 +209,7 @@ def compute_cva(
 
     pd_arr = np.asarray(marginal_pd, dtype=np.float64)
     df_arr = np.asarray(discount_factor, dtype=np.float64)
-    lgd = float(loss_given_default)
+    lgd = loss_given_default
 
     # Chunked evaluation
     if chunk_size is not None and chunk_size > 0 and chunk_size < n_paths:
@@ -271,7 +271,7 @@ def compute_cva_chunked(
 
     pd_arr = np.asarray(marginal_pd, dtype=np.float64)
     df_arr = np.asarray(discount_factor, dtype=np.float64)
-    lgd = float(loss_given_default)
+    lgd = loss_given_default
 
     offset = 0
     for chunk in exposure_chunks:
@@ -361,7 +361,7 @@ def compute_exposure_profile(
 
     max_pfe_val = 0.0
     for p in percentiles:
-        p_val = float(p)
+        p_val = p
         pfe_curve = np.percentile(exp_arr, p_val, axis=0)
         pfe_profiles[p_val] = pfe_curve
         max_pfe_val = max(max_pfe_val, float(np.max(pfe_curve)))

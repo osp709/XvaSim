@@ -97,10 +97,10 @@ class GarmanKohlhagenFXModel(FXModel):
                 raise ValueError(msg)
 
             self._params = GarmanKohlhagenParams(
-                spot_fx=float(spot_fx),
-                fx_vol_ann=float(fx_vol_ann),
-                domestic_rate_ann=float(domestic_rate_ann),
-                foreign_rate_ann=float(foreign_rate_ann),
+                spot_fx=spot_fx,
+                fx_vol_ann=fx_vol_ann,
+                domestic_rate_ann=domestic_rate_ann,
+                foreign_rate_ann=foreign_rate_ann,
                 discount_curve_domestic_yrs=(
                     np.asarray(discount_curve_domestic_yrs, dtype=np.float64)
                     if discount_curve_domestic_yrs is not None
@@ -220,7 +220,7 @@ class GarmanKohlhagenFXModel(FXModel):
         """
         df_d = float(self.domestic_discount_factor(maturity_yrs))
         df_f = float(self.foreign_discount_factor(maturity_yrs))
-        return float(self._spot_fx * df_f / max(df_d, 1e-18))
+        return self._spot_fx * df_f / max(df_d, 1e-18)
 
     def closed_form_option_price(
         self,
@@ -266,7 +266,7 @@ class GarmanKohlhagenFXModel(FXModel):
 
         if sigma_sqrt_t < 1e-12:
             intrinsic = max(fwd - strike, 0.0) if is_call else max(strike - fwd, 0.0)
-            return float(notional * df_d * intrinsic)
+            return notional * df_d * intrinsic
 
         d1 = (np.log(fwd / strike) + 0.5 * vol**2 * maturity_yrs) / sigma_sqrt_t
         d2 = d1 - sigma_sqrt_t

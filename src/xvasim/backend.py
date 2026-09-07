@@ -802,7 +802,7 @@ def set_backend(name: BackendType | str, device: str = "cpu") -> None:
 @contextlib.contextmanager
 def use_backend(
     name: BackendType | str, device: str = "cpu"
-) -> typing.Iterator[TensorBackend]:
+) -> typing.Generator[TensorBackend]:
     """Context manager to execute a code block under a specified backend.
 
     Args:

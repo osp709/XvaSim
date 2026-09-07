@@ -619,7 +619,7 @@ def compare_t0_npv_fitting(
     pseudo_var = results.get("pseudo", {}).get("variance", 0.0)
     for _m_name, stats in results.items():
         if pseudo_var > 1e-18 and stats["variance"] > 1e-18:
-            stats["variance_reduction_factor"] = float(pseudo_var / stats["variance"])
+            stats["variance_reduction_factor"] = pseudo_var / stats["variance"]
         else:
             stats["variance_reduction_factor"] = 1.0
 

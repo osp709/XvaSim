@@ -696,7 +696,7 @@ def benchmark_price_foreign_exchange_forward(
         df_f = float(
             fx_model.foreign_ir_model.interpolate_discount_factor(maturity_yrs)
         )
-        spot = float(fx_model.spot_fx)
+        spot = fx_model.spot_fx
     elif hasattr(fx_model, "domestic_discount_factor") and hasattr(
         fx_model, "foreign_discount_factor"
     ):
@@ -711,10 +711,10 @@ def benchmark_price_foreign_exchange_forward(
     fwd_fx = spot * (df_f / max(df_d, 1e-18))
     price = notional * (fwd_fx - strike) * df_d
     return PricingResult(
-        price=float(price),
-        forward_fx=float(fwd_fx),
-        domestic_df=float(df_d),
-        foreign_df=float(df_f),
+        price=price,
+        forward_fx=fwd_fx,
+        domestic_df=df_d,
+        foreign_df=df_f,
     )
 
 
@@ -919,8 +919,8 @@ def benchmark_price_foreign_exchange_option(
         df_f = float(
             fx_model.foreign_ir_model.interpolate_discount_factor(maturity_yrs)
         )
-        spot = float(fx_model.spot_fx)
-        vol = float(fx_model.fx_vol_ann)
+        spot = fx_model.spot_fx
+        vol = fx_model.fx_vol_ann
 
         fwd_fx = spot * (df_f / max(df_d, 1e-18))
         total_std = vol * np.sqrt(maturity_yrs)
@@ -929,8 +929,8 @@ def benchmark_price_foreign_exchange_option(
                 max(fwd_fx - strike, 0.0) if is_call else max(strike - fwd_fx, 0.0)
             )
             return PricingResult(
-                price=float(notional * df_d * intrinsic),
-                forward_fx=float(fwd_fx),
+                price=notional * df_d * intrinsic,
+                forward_fx=fwd_fx,
             )
 
         d1 = (np.log(fwd_fx / strike) + 0.5 * vol * vol * maturity_yrs) / total_std
@@ -948,7 +948,7 @@ def benchmark_price_foreign_exchange_option(
                 * (strike * float(norm.cdf(-d2)) - fwd_fx * float(norm.cdf(-d1)))
             )
 
-        return PricingResult(price=float(pv), forward_fx=float(fwd_fx))
+        return PricingResult(price=pv, forward_fx=fwd_fx)
 
     msg = f"Analytical benchmark not supported for {type(fx_model).__name__}"
     raise TypeError(msg)
@@ -1149,8 +1149,8 @@ def benchmark_price_zero_coupon_inflation_swap(
     price = notional * p_nom * unit_net
     return PricingResult(
         price=float(price),
-        fair_swap_rate=float(fair_swap_rate),
-        forward_cpi=float(forward_cpi_val),
+        fair_swap_rate=fair_swap_rate,
+        forward_cpi=forward_cpi_val,
     )
 
 
@@ -1388,7 +1388,7 @@ def benchmark_price_consumer_price_index_option(
             notional=notional,
             is_call=is_call,
         )
-        return PricingResult(price=price_val, forward_cpi=float(forward_cpi_val))
+        return PricingResult(price=price_val, forward_cpi=forward_cpi_val)
 
     if isinstance(model, JarrowYildirimModel):
         p_nom = float(model.nominal_ir_model.interpolate_discount_factor(maturity_yrs))
@@ -1402,8 +1402,8 @@ def benchmark_price_consumer_price_index_option(
                 else max(k_comp - fwd_ratio, 0.0)
             )
             return PricingResult(
-                price=float(notional * p_nom * intrinsic),
-                forward_cpi=float(forward_cpi_val),
+                price=notional * p_nom * intrinsic,
+                forward_cpi=forward_cpi_val,
             )
 
         d1 = (np.log(fwd_ratio / k_comp) + 0.5 * tot_var) / total_std
@@ -1419,7 +1419,7 @@ def benchmark_price_consumer_price_index_option(
             )
         return PricingResult(
             price=float(notional * pv),
-            forward_cpi=float(forward_cpi_val),
+            forward_cpi=forward_cpi_val,
         )
 
     p_nom = (
@@ -1431,8 +1431,8 @@ def benchmark_price_consumer_price_index_option(
         max(fwd_ratio - k_comp, 0.0) if is_call else max(k_comp - fwd_ratio, 0.0)
     )
     return PricingResult(
-        price=float(notional * p_nom * intrinsic),
-        forward_cpi=float(forward_cpi_val),
+        price=notional * p_nom * intrinsic,
+        forward_cpi=forward_cpi_val,
     )
 
 
@@ -2004,9 +2004,9 @@ def price_cross_currency_swap(
     dom_type = _parse_swap_leg_type(domestic_leg_type, "domestic_leg_type")
     for_type = _parse_swap_leg_type(foreign_leg_type, "foreign_leg_type")
 
-    for_notional = float(foreign_notional)
+    for_notional = foreign_notional
     dom_notional = (
-        float(domestic_notional)
+        domestic_notional
         if domestic_notional is not None
         else for_notional * spot_fx
     )

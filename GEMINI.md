@@ -94,11 +94,13 @@ XvaSim/
 ## 🛠️ Coding & Quality Standards
 
 ### 1. Strict Typing (Pyrefly)
-- Pyrefly runs type checking on Python 3.14 (`uv run pyrefly check`).
+- Pyrefly runs type checking on Python 3.14 (`uv run pyrefly check` or `uv run pyrefly check --min-severity info`).
 - All functions, methods, parameters, and return types MUST have explicit type annotations.
 - Use `@typing.overload` / `@overload` for polymorphic or dual-signature interfaces.
 - Avoid loose `Any` return types; cast numpy array conversions with `np.asarray(..., dtype=np.float64)` where necessary.
 - In `__init__.py` files, keep `__all__` sorted alphabetically.
+- **No Redundant Type Conversions (`unnecessary-type-conversion`)**: Never wrap variables, parameters, or expressions that are already statically known `float` in redundant `float(...)` calls (e.g. parameters typed as `float`, attributes returning `float`, or arithmetic on pure floats). Pyrefly emits warnings for unnecessary conversions.
+- **Context Manager Annotations (`deprecated`)**: For generator functions decorated with `@contextlib.contextmanager`, annotate the return type as `typing.Generator[YieldType]` (or `collections.abc.Generator[YieldType]`), NOT `Iterator[YieldType]`. Do not provide redundant `, None, None` type arguments (Ruff UP043).
 
 ### 2. Linting (Ruff)
 - Line length limit: **88** characters.

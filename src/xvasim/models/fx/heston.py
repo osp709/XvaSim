@@ -130,14 +130,14 @@ class HestonFXModel(FXModel):
                 raise ValueError(msg)
 
             self._params = HestonFXParams(
-                spot_fx=float(spot_fx),
-                v_0=float(v_0),
-                kappa_ann=float(kappa_ann),
-                theta_ann=float(theta_ann),
-                sigma_v_ann=float(sigma_v_ann),
-                rho=float(rho),
-                domestic_rate_ann=float(domestic_rate_ann),
-                foreign_rate_ann=float(foreign_rate_ann),
+                spot_fx=spot_fx,
+                v_0=v_0,
+                kappa_ann=kappa_ann,
+                theta_ann=theta_ann,
+                sigma_v_ann=sigma_v_ann,
+                rho=rho,
+                domestic_rate_ann=domestic_rate_ann,
+                foreign_rate_ann=foreign_rate_ann,
                 discount_curve_domestic_yrs=(
                     np.asarray(discount_curve_domestic_yrs, dtype=np.float64)
                     if discount_curve_domestic_yrs is not None
@@ -303,7 +303,7 @@ class HestonFXModel(FXModel):
         """
         df_d = float(self.domestic_discount_factor(maturity_yrs))
         df_f = float(self.foreign_discount_factor(maturity_yrs))
-        return float(self._spot_fx * df_f / max(df_d, 1e-18))
+        return self._spot_fx * df_f / max(df_d, 1e-18)
 
     def _characteristic_function(
         self,
@@ -420,11 +420,11 @@ class HestonFXModel(FXModel):
 
         is_call = option_type.strip().lower() == "call"
         if is_call:
-            return float(notional * call_price)
+            return notional * call_price
 
         # Put via Put-Call Parity
         put_price = call_price - self._spot_fx * df_f + strike * df_d
-        return float(notional * max(0.0, put_price))
+        return notional * max(0.0, put_price)
 
     def simulate_paths(
         self,

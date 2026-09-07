@@ -117,7 +117,7 @@ class HullWhite1FModel(InterestRateModel):
         """
         tau = max(maturity_yrs - t, 0.0)
         if abs(self.a_ann) < 1e-12:
-            return float(tau)
+            return tau
         return float((1.0 - np.exp(-self.a_ann * tau)) / self.a_ann)
 
     def alpha(self, t: float) -> float:
@@ -128,7 +128,7 @@ class HullWhite1FModel(InterestRateModel):
         """
         fwd = self.instantaneous_forward(t)
         if abs(self.a_ann) < 1e-12:
-            return float(fwd + 0.5 * (self.sigma_ann * t) ** 2)
+            return fwd + 0.5 * (self.sigma_ann * t) ** 2
         exp_at = np.exp(-self.a_ann * t)
         correction = (self.sigma_ann**2 / (2.0 * self.a_ann**2)) * ((1.0 - exp_at) ** 2)
         return float(fwd + correction)

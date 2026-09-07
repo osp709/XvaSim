@@ -141,8 +141,8 @@ class JarrowYildirimModel(InflationModel):
         else:
             self._real_ir = real_ir_model
 
-        self._base_cpi = float(base_cpi)
-        self._cpi_vol_ann = float(cpi_vol_ann)
+        self._base_cpi = base_cpi
+        self._cpi_vol_ann = cpi_vol_ann
 
         if correlation_matrix is None:
             self._correlation_matrix = np.eye(3, dtype=np.float64)
@@ -288,7 +288,7 @@ class JarrowYildirimModel(InflationModel):
         kappa_n = 0.0
         if isinstance(self._nominal_ir, LGMModel):
             kappa_n = self._nominal_ir.kappa_ann
-            sig_n = float(self._nominal_ir.sigma_at(maturity_yrs / 2.0))
+            sig_n = self._nominal_ir.sigma_at(maturity_yrs / 2.0)
         elif isinstance(self._nominal_ir, HullWhite1FModel):
             kappa_n = self._nominal_ir.a_ann
             sig_n = self._nominal_ir.sigma_ann
@@ -297,7 +297,7 @@ class JarrowYildirimModel(InflationModel):
         kappa_r = 0.0
         if isinstance(self._real_ir, LGMModel):
             kappa_r = self._real_ir.kappa_ann
-            sig_r = float(self._real_ir.sigma_at(maturity_yrs / 2.0))
+            sig_r = self._real_ir.sigma_at(maturity_yrs / 2.0)
         elif isinstance(self._real_ir, HullWhite1FModel):
             kappa_r = self._real_ir.a_ann
             sig_r = self._real_ir.sigma_ann

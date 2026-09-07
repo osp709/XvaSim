@@ -39,20 +39,48 @@ The following table summarizes all financial instruments and valuation adjustmen
 
 ## 🎲 Supported Risk Factors & Stochastic Models
 
-`XvaSim` features a modular dynamic registry (`ModelRegistry`) and factories (`create_ir_model`, `create_credit_model`, `create_fx_model`, `create_inflation_model`) allowing plug-and-play selection of stochastic models for each simulated risk factor:
+`XvaSim` features a modular dynamic registry (`ModelRegistry`) and factories (`create_ir_model`, `create_credit_model`, `create_fx_model`, `create_inflation_model`) allowing plug-and-play selection of stochastic models for each simulated risk factor. Query the live registry at runtime with `list_available_models(...)`.
 
-| Risk Factor | Supported Stochastic Models | Model Registry Key | Concrete Class | Key Parameters |
+| Risk Factor | Stochastic Model | Concrete Class | Registry Keys | Key Parameters |
 | :--- | :--- | :--- | :--- | :--- |
-| **Domestic / Foreign Interest Rate** | Linear Gauss-Markov (LGM) | `"lgm"` | `LGMModel` | $\kappa_{\text{ann}}$, $\sigma(t)_{\text{ann}}$, Discount Curve |
-| | Hull-White 1-Factor (HW1F) | `"hull_white"` | `HullWhite1FModel` | $a_{\text{ann}}$, $\sigma_{\text{ann}}$, Discount Curve |
-| | Vasicek Short Rate | `"vasicek"` | `VasicekModel` | $\kappa_{\text{ann}}$, $\theta_{\text{ann}}$, $\sigma_{\text{ann}}$, $r_0$ |
-| | Cox-Ingersoll-Ross (CIR) | `"cir"` | `CIRInterestRateModel` | $\kappa_{\text{ann}}$, $\theta_{\text{ann}}$, $\sigma_{\text{ann}}$, $r_0$ |
-| **Foreign Exchange (FX Spot & Volatility)** | Two-Currency Multi-Factor FX | `"two_currency"` | `TwoCurrencyFXModel` | Domestic IR Model, Foreign IR Model, $S_0$, $\sigma_{\text{fx}}$, Correlation Matrix |
-| | Garman-Kohlhagen / Black FX | `"garman_kohlhagen"` | `GarmanKohlhagenFXModel` | $r_d$, $r_f$, $S_0$, $\sigma_{\text{fx}}$ |
-| | Heston Stochastic Volatility FX | `"heston"` | `HestonFXModel` | $r_d$, $r_f$, $S_0$, $v_0$, $\kappa_v$, $\theta_v$, $\sigma_v$, $\rho_{S,v}$ |
-| **Counterparty Credit / Hazard Rate** | Cox-Ingersoll-Ross (CIR) Hazard Rate | `"cir"` | `CIRHazardRateModel` | $\kappa_{\text{ann}}$, $\theta_{\text{ann}}$, $\sigma_{\text{ann}}$, $\lambda_0$ |
-| **Inflation (CPI Index & Real Rates)** | Jarrow-Yildirim (JY) Two-Economy | `"jarrow_yildirim"` | `JarrowYildirimModel` | Nominal HW1F, Real HW1F, $I_0$, $\sigma_I$, $3 \times 3$ Correlation Matrix |
-| | Black CPI Forward Log-Normal | `"black_inflation"` | `BlackInflationModel` | Nominal Curve, Real Curve, $I_0$, $\sigma_{I,\text{ann}}$ |
+| **Interest Rate** | Linear Gauss-Markov (LGM) | `LGMModel` | `lgm`, `linear_gauss_markov` | $\kappa_{\text{ann}}$, $\sigma(t)_{\text{ann}}$, Discount Curve |
+| | Hull-White 1-Factor (HW1F) | `HullWhite1FModel` | `hull_white`, `hull_white_1f`, `hw1f` | $a_{\text{ann}}$, $\sigma_{\text{ann}}$, Discount Curve |
+| | Vasicek Short Rate | `VasicekModel` | `vasicek` | $\kappa_{\text{ann}}$, $\theta_{\text{ann}}$, $\sigma_{\text{ann}}$, $r_0$ |
+| | Cox-Ingersoll-Ross (CIR) | `CIRInterestRateModel` | `cir`, `cir_ir`, `cox_ingersoll_ross` | $\kappa_{\text{ann}}$, $\theta_{\text{ann}}$, $\sigma_{\text{ann}}$, $r_0$ |
+| **Foreign Exchange (FX Spot & Volatility)** | Two-Currency Multi-Factor FX | `TwoCurrencyFXModel` | `two_currency`, `cross_currency` | Domestic/foreign IR models, $S_0$, $\sigma_{\text{fx}}$, $3\times3$ correlation |
+| | Garman-Kohlhagen / Black-Scholes | `GarmanKohlhagenFXModel` | `garman_kohlhagen`, `black_scholes`, `gbm` | $S_0$, $\sigma_{\text{fx}}$, $r_d$, $r_f$ (or discount curves) |
+| | Heston Stochastic Volatility FX | `HestonFXModel` | `heston`, `heston_fx` | $S_0$, $v_0$, $\kappa_v$, $\theta_v$, $\sigma_v$, $\rho_{S,v}$, $r_d$, $r_f$ |
+| **Counterparty Credit / Hazard Rate** | Cox-Ingersoll-Ross (CIR) Hazard Rate | `CIRHazardRateModel` | `cir`, `cir_hazard_rate`, `cox_ingersoll_ross` | $\kappa_{\text{ann}}$, $\theta_{\text{ann}}$, $\sigma_{\text{ann}}$, $\lambda_0$ |
+| **Inflation (CPI Index & Real Rates)** | Jarrow-Yildirim (JY) Two-Economy | `JarrowYildirimModel` | `jarrow_yildirim`, `jy`, `two_factor_hw` | Nominal & real IR models, $I_0$, $\sigma_I$, $3\times3$ correlation |
+| | Black CPI Forward Log-Normal | `BlackInflationModel` | `black`, `black_inflation`, `lognormal` | Nominal curve, Real curve, $I_0$, $\sigma_{I,\text{ann}}$ |
+
+> `RiskFactorType` also enumerates `EQUITY` and `COMMODITY` risk-factor categories (reserved; no concrete models implemented yet).
+
+### Model Reference
+
+Every model can be constructed from its parameter dataclass (`params=...`) or from individual keyword arguments; defaults are shown below. All model classes are exported from the package root (`from xvasim import ...`).
+
+**Interest rate models (`xvasim.models.ir`)** — subclass `InterestRateModel`; all expose the discount-curve properties `discount_curve_yrs` / `discount_factors`, the curve helpers `interpolate_discount_factor(t)` and `instantaneous_forward(t)`, plus `short_rate(t, state)`, `zero_coupon_bond(t, T, state)`, `discount_path(times, state_paths)`, and `simulate_paths(times, n_paths, ...)`.
+
+- `LGMModel` — `(params=None, *, kappa_ann=0.03, sigma_grid_yrs, sigma_values_ann, discount_curve_yrs, discount_factors)`. Piecewise-constant volatility $\sigma(t)$; helpers `h_function(t)`, `zeta(t)`, `sigma_at(t)`; analytical swaption pricing `swaption_price_normal(...)` / alias `analytical_swaption_price(...)`; classmethod `calibrate_to_swaptions(...)`. Dataclass `LGMParams`.
+- `HullWhite1FModel` — `(params=None, *, a_ann=0.03, sigma_ann=0.01, discount_curve_yrs, discount_factors)`. Helpers `b_function(t, T)`, `alpha(t)`. Dataclass `HullWhite1FParams`.
+- `VasicekModel` — `(params=None, *, kappa_ann=0.15, theta_ann=0.03, sigma_ann=0.015, r0_ann=0.025, discount_curve_yrs=None, discount_factors=None)`. When no curve is supplied, an analytical model-implied term structure is generated. Dataclass `VasicekParams`.
+- `CIRInterestRateModel` — `(params=None, *, kappa_ann=0.20, theta_ann=0.03, sigma_ann=0.08, r0_ann=0.025, discount_curve_yrs=None, discount_factors=None)`. Simulation uses full truncation (states clamped at 0); non-negative when the Feller condition $2\kappa\theta \ge \sigma^2$ holds. Dataclass `CIRInterestRateParams`.
+
+**Credit model (`xvasim.models.credit`)**
+
+- `CIRHazardRateModel` — `(params=None, *, kappa_ann=0.5, theta_ann=0.03, sigma_ann=0.10, lambda_0_ann=0.02)`. Closed-form `survival_probability(tenors_yrs)`, `marginal_pd(tenors_yrs)`, classmethod `calibrate_from_spreads(credit_spreads_ann, tenors_yrs)`. Dataclass `CIRHazardRateParams`.
+
+**FX models (`xvasim.models.fx`)** — subclass `FXModel`. `simulate_paths(maturity_yrs, n_paths, n_steps, ...)` returns the tuple `(times, x_dom, x_for, fx_spot)` (for Heston, `(times, v_paths, x_dummy, fx_spot)`).
+
+- `TwoCurrencyFXModel` — `(domestic_ir_model, foreign_ir_model, spot_fx, fx_vol_ann, correlation_matrix)`; IR components may be `InterestRateModel` instances or `LGMParams`. Constructors `from_params(...)`, `from_ir_models(...)`, `from_components(...)`, `from_lgm_params(...)`. Quanto drift $\rho_{f,S}\sigma_f\sigma_{fx}$ applied to the foreign rate under the domestic measure. Dataclass `TwoCurrencyFXParams`.
+- `GarmanKohlhagenFXModel` — `(params=None, *, spot_fx=1.0, fx_vol_ann=0.10, domestic_rate_ann=0.0, foreign_rate_ann=0.0, discount_curve_domestic_yrs=None, discount_factors_domestic=None, discount_curve_foreign_yrs=None, discount_factors_foreign=None)`. Curve-override-capable `domestic_discount_factor(t)` / `foreign_discount_factor(t)`, `forward_rate(T)`, closed-form `closed_form_option_price(...)` (`price_option_analytical` alias); `from_params(...)`. Dataclass `GarmanKohlhagenFXParams`.
+- `HestonFXModel` — `(params=None, *, spot_fx=1.0, v_0=0.04, kappa_ann=2.0, theta_ann=0.04, sigma_v_ann=0.20, rho=-0.5, domestic_rate_ann=0.0, foreign_rate_ann=0.0, discount_curve_*_yrs=None, discount_factors_*=None)`. Semi-analytical `closed_form_option_price(...)` (put via put-call parity), `is_feller_satisfied`, `num_factors == 2`; `from_params(...)`. Dataclass `HestonFXParams`.
+
+**Inflation models (`xvasim.models.inflation`)** — subclass `InflationModel`. `simulate_paths(...)` returns an `InflationSimulationResult` with fields `times`, `nominal_states`, `real_states`, `cpi_index`, `nominal_short_rates`, `real_short_rates`, `nominal_discount_factors`; it also supports 4-tuple unpacking: `times, x_nom, x_real, cpi = result`.
+
+- `JarrowYildirimModel` — `(nominal_ir_model, real_ir_model, base_cpi=100.0, cpi_vol_ann=0.02, correlation_matrix=None)` (default: 3×3 identity). `forward_cpi(T)`, `zero_coupon_inflation_swap_rate(T)`, `total_variance_at(T)`; constructors `from_ir_models(...)`, `from_components(...)`, `from_lgm_params(...)`. Dataclass `JarrowYildirimParams`.
+- `BlackInflationModel` — `(params=None, *, nominal_discount_curve_yrs, nominal_discount_factors, real_discount_curve_yrs, real_discount_factors, base_cpi=100.0, cpi_vol_ann=0.02)`. `interpolate_nominal_df(t)` / `interpolate_real_df(t)`, `forward_cpi(T)`, `zero_coupon_inflation_swap_rate(T)`, closed-form `price_consumer_price_index_option_analytical(...)` (`price_cpi_option_analytical` alias); `from_params(...)`. Dataclass `BlackInflationParams`.
 
 ---
 
@@ -281,7 +309,10 @@ graph TD
 XvaSim/
 ├── pyproject.toml              # Build & dependency config (Hatchling, uv, ruff, pyrefly, pytest, coverage)
 ├── README.md                   # Human & LLM documentation
-├── GEMINI.md                   # AI assistant context & developer guide
+├── AGENTS.md                   # Authoritative agentic rules, architecture & standards
+├── docs/                       # Living project documentation
+│   ├── PROJECT_TRACKER.md      # Project status, milestones, workstreams, backlog
+│   └── FIXES_AND_COVERAGE.md   # Fixes log & test coverage detail
 ├── src/
 │   └── xvasim/
 │       ├── __init__.py         # Package root exports

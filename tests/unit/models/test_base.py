@@ -132,9 +132,6 @@ class TestBaseClasses(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             mdl.swaption_price_normal(1.0, 5.0, 0.008, 0.03)
 
-        with self.assertRaises(NotImplementedError):
-            mdl.analytical_swaption_price(1.0, 5.0, 0.008, 0.03)
-
     def test_credit_model_base_methods(self) -> None:
         """Verify CreditModel marginal_pd default calculation from survival probabilities."""
         mdl = DummyCreditModel()

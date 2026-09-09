@@ -1,13 +1,62 @@
-"""End-to-end integration test: Swaption Calibration -> IR Simulation -> Exposure -> CIR Calibration -> CVA."""
+"""End-to-end integration test: Swaption calibration -> IR simulation -> Exposure -> Credit calibration -> Full XVA suite."""
 
 import unittest
 
 import numpy as np
 import pytest
 
-from xvasim.cva_engine import compute_cva, compute_marginal_pd
+from xvasim.cva_engine import (
+    compute_cva,
+    compute_dva,
+    compute_kva,
+    compute_marginal_pd,
+    compute_total_xva,
+)
 from xvasim.models.ir.lgm import LGMModel
 from xvasim.qmc import RandomSequenceType
+
+
+def _run_simulation():
+    """Shared end-to-end pipeline returning exposures, discount paths, and time steps."""
+    # 1. Market curves
+    curve_tenors = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 30.0])
+    curve_dfs = np.exp(-0.03 * curve_tenors)
+
+    # 2. Calibrate LGM to swaptions
+    swaption_expiries = np.array([1.0, 2.0, 5.0])
+    swap_tenors = np.array([5.0, 5.0, 5.0])
+    market_vols = np.array([0.0080, 0.0085, 0.0090])
+    fixed_rates = np.array([0.03, 0.03, 0.03])
+
+    lgm_model = LGMModel.calibrate_to_swaptions(
+        swaption_expiries_yrs=swaption_expiries,
+        swap_tenors_yrs=swap_tenors,
+        market_normal_vols_ann=market_vols,
+        curve_yrs=curve_tenors,
+        curve_dfs=curve_dfs,
+        fixed_rates_ann=fixed_rates,
+        kappa_ann=0.03,
+    )
+
+    # 3. Simulate future rate paths
+    sim_times = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0])
+    n_paths = 256
+    x_paths = lgm_model.simulate_paths(
+        times=sim_times,
+        n_paths=n_paths,
+        random_type=RandomSequenceType.SOBOL,
+        seed=42,
+    )
+    disc_paths = lgm_model.discount_path(sim_times, x_paths)
+
+    # 4. Generate portfolio exposures (signed, both positive and negative)
+    exposures = np.zeros((n_paths, len(sim_times)))
+    for i, t in enumerate(sim_times):
+        # Simulated swap NPV proxy proportional to x(t); signed exposure
+        pv_t = 100000.0 * (x_paths[:, i] * (5.0 - t))
+        exposures[:, i] = pv_t
+
+    return sim_times, exposures, disc_paths, n_paths
 
 
 @pytest.mark.integration
@@ -16,44 +65,7 @@ class TestPortfolioCvaPipeline(unittest.TestCase):
 
     def test_complete_cva_workflow(self) -> None:
         """Execute full end-to-end CVA simulation on an interest rate swap portfolio."""
-        # 1. Market curves
-        curve_tenors = np.array([0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 30.0])
-        curve_dfs = np.exp(-0.03 * curve_tenors)
-
-        # 2. Calibrate LGM to swaptions
-        swaption_expiries = np.array([1.0, 2.0, 5.0])
-        swap_tenors = np.array([5.0, 5.0, 5.0])
-        market_vols = np.array([0.0080, 0.0085, 0.0090])
-        fixed_rates = np.array([0.03, 0.03, 0.03])
-
-        lgm_model = LGMModel.calibrate_to_swaptions(
-            swaption_expiries_yrs=swaption_expiries,
-            swap_tenors_yrs=swap_tenors,
-            market_normal_vols_ann=market_vols,
-            curve_yrs=curve_tenors,
-            curve_dfs=curve_dfs,
-            fixed_rates_ann=fixed_rates,
-            kappa_ann=0.03,
-        )
-
-        # 3. Simulate future rate paths
-        sim_times = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0])
-        n_paths = 256
-        x_paths = lgm_model.simulate_paths(
-            times=sim_times,
-            n_paths=n_paths,
-            random_type=RandomSequenceType.SOBOL,
-            seed=42,
-        )
-        disc_paths = lgm_model.discount_path(sim_times, x_paths)
-
-        # 4. Generate mock positive portfolio exposures
-        # In a payer swap, exposure is max(V(t), 0)
-        exposures = np.zeros((n_paths, len(sim_times)))
-        for i, t in enumerate(sim_times):
-            # Simulated swap NPV proxy proportional to x(t)
-            pv_t = 100000.0 * (x_paths[:, i] * (5.0 - t))
-            exposures[:, i] = np.maximum(pv_t, 0.0)
+        _sim_times, exposures, disc_paths, n_paths = _run_simulation()
 
         # 5. Calibrate Credit Model & Compute Marginal PDs
         credit_tenors = np.array([0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0])
@@ -61,7 +73,8 @@ class TestPortfolioCvaPipeline(unittest.TestCase):
         marginal_pds = compute_marginal_pd(market_spreads, credit_tenors)
 
         # 6. Aggregate CVA across simulation steps > 0
-        exp_steps = exposures[:, 1:]
+        # compute_cva expects positive (EPE-style) exposure input
+        exp_steps = np.maximum(exposures[:, 1:], 0.0)
         mpd_steps = np.tile(marginal_pds, (n_paths, 1))
         df_steps = disc_paths[:, 1:]
 
@@ -74,6 +87,59 @@ class TestPortfolioCvaPipeline(unittest.TestCase):
 
         self.assertIsInstance(cva_amount, float)
         self.assertGreater(cva_amount, 0.0)
+
+    def test_full_xva_suite(self) -> None:
+        """Compute CVA, DVA, KVA, FVA and MVA end-to-end on a realistic portfolio."""
+        sim_times, exposures, disc_paths, n_paths = _run_simulation()
+
+        # Credit curves: counterparty riskier than the firm
+        credit_tenors = np.array([0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0])
+        cp_spreads = np.array([0.010, 0.012, 0.014, 0.016, 0.020, 0.022, 0.025])
+        own_spreads = np.array([0.006, 0.007, 0.008, 0.009, 0.011, 0.012, 0.014])
+
+        cp_pd = compute_marginal_pd(cp_spreads, credit_tenors)
+        own_pd = compute_marginal_pd(own_spreads, credit_tenors)
+
+        # Time steps from simulation grid (skip t=0, no time interval contributes)
+        dt_steps = np.diff(sim_times)
+        exp_steps = exposures[:, 1:]
+        mpd_cp = np.tile(cp_pd, (n_paths, 1))
+        mpd_own = np.tile(own_pd, (n_paths, 1))
+        df_steps = disc_paths[:, 1:]
+        pos_exp_steps = np.maximum(exp_steps, 0.0)
+
+        # Individual adjustments
+        cva_amount = compute_cva(
+            pos_exp_steps, mpd_cp, df_steps, loss_given_default=0.60
+        )
+        dva_amount = compute_dva(
+            exp_steps, mpd_own, df_steps, loss_given_default=0.55
+        )
+        kva_amount = compute_kva(
+            exp_steps, dt_steps, df_steps, capital_charge_ann=0.08
+        )
+
+        # Sanity checks
+        self.assertGreater(cva_amount, 0.0)
+        self.assertGreaterEqual(dva_amount, 0.0)
+        self.assertGreater(kva_amount, 0.0)
+
+        # Single-pass aggregator must match the individual components
+        total = compute_total_xva(
+            exp_steps,
+            dt_steps,
+            df_steps,
+            mpd_cp,
+            mpd_own,
+            counterparty_lgd=0.60,
+            own_lgd=0.55,
+            funding_spread_borrow_ann=0.005,
+            capital_charge_ann=0.08,
+        )
+        self.assertAlmostEqual(total["cva"], cva_amount, places=10)
+        self.assertAlmostEqual(total["dva"], dva_amount, places=10)
+        self.assertAlmostEqual(total["kva"], kva_amount, places=10)
+        self.assertGreater(total["total_xva"], 0.0)
 
 
 if __name__ == "__main__":

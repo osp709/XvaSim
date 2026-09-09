@@ -216,26 +216,6 @@ class JarrowYildirimModel(InflationModel):
             correlation_matrix=correlation_matrix,
         )
 
-    from_components = from_ir_models
-
-    @classmethod
-    def from_lgm_params(
-        cls,
-        nominal: LGMParams,
-        real: LGMParams,
-        base_cpi: float = 100.0,
-        cpi_vol_ann: float = 0.02,
-        correlation_matrix: np.ndarray | None = None,
-    ) -> JarrowYildirimModel:
-        """Construct a JarrowYildirimModel from nominal and real LGMParams instances."""
-        return cls.from_ir_models(
-            nominal=nominal,
-            real=real,
-            base_cpi=base_cpi,
-            cpi_vol_ann=cpi_vol_ann,
-            correlation_matrix=correlation_matrix,
-        )
-
     def forward_cpi(self, maturity_yrs: float) -> float:
         """Compute the theoretical forward CPI level E[I(T)] at maturity T.
 

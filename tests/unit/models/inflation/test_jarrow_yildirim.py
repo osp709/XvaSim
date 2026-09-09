@@ -97,15 +97,16 @@ class TestJarrowYildirimModel(unittest.TestCase):
             self.model.real_ir_model.discount_factors, self.real_dfs
         )
 
-    def test_from_lgm_params(self) -> None:
-        """Verify constructor from LGMParams, from_ir_models, and from_components."""
+    def test_from_ir_models(self) -> None:
+        """Verify constructor from_ir_models with LGMParams and model instances."""
         nom_p = LGMParams(
             0.03, np.array([30.0]), np.array([0.01]), self.tenors, self.nom_dfs
         )
         real_p = LGMParams(
             0.02, np.array([30.0]), np.array([0.008]), self.tenors, self.real_dfs
         )
-        mdl = JarrowYildirimModel.from_lgm_params(
+        # from_ir_models with LGMParams converts to LGMModel
+        mdl = JarrowYildirimModel.from_ir_models(
             nominal=nom_p,
             real=real_p,
             base_cpi=105.0,
@@ -114,28 +115,19 @@ class TestJarrowYildirimModel(unittest.TestCase):
         )
         self.assertIsInstance(mdl, JarrowYildirimModel)
         self.assertEqual(mdl.base_cpi, 105.0)
+        self.assertIsInstance(mdl.nominal_ir_model, LGMModel)
+        self.assertIsInstance(mdl.real_ir_model, LGMModel)
 
-        # from_ir_models with LGMParams
+        # from_ir_models with InterestRateModel instances passes through
         mdl_ir = JarrowYildirimModel.from_ir_models(
-            nominal=nom_p,
-            real=real_p,
-            base_cpi=105.0,
-            cpi_vol_ann=0.025,
-            correlation_matrix=self.corr,
-        )
-        self.assertIsInstance(mdl_ir, JarrowYildirimModel)
-        self.assertIsInstance(mdl_ir.nominal_ir_model, LGMModel)
-
-        # from_components with InterestRateModel instances
-        mdl_comp = JarrowYildirimModel.from_components(
             nominal=self.nom_hw,
             real=self.real_hw,
             base_cpi=105.0,
             cpi_vol_ann=0.025,
             correlation_matrix=self.corr,
         )
-        self.assertIs(mdl_comp.nominal_ir_model, self.nom_hw)
-        self.assertIs(mdl_comp.real_ir_model, self.real_hw)
+        self.assertIs(mdl_ir.nominal_ir_model, self.nom_hw)
+        self.assertIs(mdl_ir.real_ir_model, self.real_hw)
 
     def test_forward_cpi_and_swap_rate(self) -> None:
         """Verify forward CPI and fair swap rate calculation."""

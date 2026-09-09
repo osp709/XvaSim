@@ -11,12 +11,9 @@ from xvasim.models.ir.hull_white import HullWhite1FModel
 from xvasim.pricing_engine import (
     OptionType,
     benchmark_price_consumer_price_index_option,
-    benchmark_price_cpi_option,
     benchmark_price_zero_coupon_inflation_swap,
     price_consumer_price_index_option,
-    price_cpi_option,
     price_year_on_year_inflation_swap,
-    price_yoy_inflation_swap,
     price_zero_coupon_inflation_swap,
 )
 from xvasim.qmc import RandomSequenceType
@@ -105,14 +102,14 @@ class TestInflationPricing(unittest.TestCase):
         )
         self.assertGreater(bm_caplet["price"], 0.0)
 
-        bm_alias = benchmark_price_cpi_option(
+        bm_floorlet = benchmark_price_consumer_price_index_option(
             model=self.black_model,
             strike_rate_ann=0.020,
             maturity_yrs=5.0,
-            option_type="call",
+            option_type="put",
             notional=1000.0,
         )
-        self.assertEqual(bm_caplet["price"], bm_alias["price"])
+        self.assertGreater(bm_floorlet["price"], 0.0)
 
         res = price_consumer_price_index_option(
             model=self.black_model,
@@ -131,8 +128,8 @@ class TestInflationPricing(unittest.TestCase):
             num_std=3.5,
         )
 
-        # Alias price_cpi_option
-        res_alias = price_cpi_option(
+        # MC pricing with put option
+        res_put = price_consumer_price_index_option(
             model=self.black_model,
             strike_rate_ann=0.020,
             maturity_yrs=5.0,
@@ -141,7 +138,7 @@ class TestInflationPricing(unittest.TestCase):
             n_paths=300,
             seed=42,
         )
-        self.assertIn("price", res_alias)
+        self.assertIn("price", res_put)
 
     def test_yoy_inflation_swap_pricing(self) -> None:
         """Verify Year-on-Year (YoY) inflation swap pricing."""
@@ -155,15 +152,16 @@ class TestInflationPricing(unittest.TestCase):
         )
         self.assertIn("price", res)
 
-        res_alias = price_yoy_inflation_swap(
+        # MC pricing with different parameters
+        res2 = price_year_on_year_inflation_swap(
             model=self.black_model,
-            fixed_rate_ann=0.02,
+            fixed_rate_ann=0.025,
             payment_times_yrs=[1.0, 2.0, 3.0],
             notional=1000.0,
             n_paths=200,
-            seed=42,
+            seed=43,
         )
-        self.assertEqual(res["price"], res_alias["price"])
+        self.assertIn("price", res2)
 
 
 if __name__ == "__main__":

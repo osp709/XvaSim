@@ -170,26 +170,6 @@ class TwoCurrencyFXModel(FXModel):
             correlation_matrix=correlation_matrix,
         )
 
-    from_components = from_ir_models
-
-    @classmethod
-    def from_lgm_params(
-        cls,
-        domestic: LGMParams,
-        foreign: LGMParams,
-        spot_fx: float,
-        fx_vol_ann: float,
-        correlation_matrix: np.ndarray,
-    ) -> TwoCurrencyFXModel:
-        """Construct a TwoCurrencyFXModel from LGMParams instances."""
-        return cls.from_ir_models(
-            domestic=domestic,
-            foreign=foreign,
-            spot_fx=spot_fx,
-            fx_vol_ann=fx_vol_ann,
-            correlation_matrix=correlation_matrix,
-        )
-
     def simulate_paths(
         self,
         maturity_yrs: float,

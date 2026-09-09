@@ -69,8 +69,8 @@ class TestTwoCurrencyFXModel(unittest.TestCase):
                 correlation_matrix=np.eye(2),
             )
 
-    def test_from_lgm_params(self) -> None:
-        """Verify factory constructor from LGMParams and from_ir_models."""
+    def test_from_ir_models(self) -> None:
+        """Verify factory constructor from_ir_models with LGMParams and model instances."""
         dom_p = LGMParams(
             kappa_ann=0.03,
             sigma_grid_yrs=np.array([5.0]),
@@ -85,7 +85,8 @@ class TestTwoCurrencyFXModel(unittest.TestCase):
             discount_curve_yrs=self.tenors,
             discount_factors=self.dfs_for,
         )
-        mdl = TwoCurrencyFXModel.from_lgm_params(
+        # from_ir_models with LGMParams converts to LGMModel
+        mdl = TwoCurrencyFXModel.from_ir_models(
             domestic=dom_p,
             foreign=for_p,
             spot_fx=1.20,
@@ -95,27 +96,16 @@ class TestTwoCurrencyFXModel(unittest.TestCase):
         self.assertIsInstance(mdl.domestic_ir_model, LGMModel)
         self.assertIsInstance(mdl.foreign_ir_model, LGMModel)
 
-        # from_ir_models with LGMParams
+        # from_ir_models with InterestRateModel instances passes through
         mdl_ir = TwoCurrencyFXModel.from_ir_models(
-            domestic=dom_p,
-            foreign=for_p,
-            spot_fx=1.20,
-            fx_vol_ann=0.10,
-            correlation_matrix=self.corr,
-        )
-        self.assertIsInstance(mdl_ir.domestic_ir_model, LGMModel)
-        self.assertIsInstance(mdl_ir.foreign_ir_model, LGMModel)
-
-        # from_components with InterestRateModel instances
-        mdl_comp = TwoCurrencyFXModel.from_components(
             domestic=self.dom_model,
             foreign=self.for_model,
             spot_fx=1.20,
             fx_vol_ann=0.10,
             correlation_matrix=self.corr,
         )
-        self.assertIs(mdl_comp.domestic_ir_model, self.dom_model)
-        self.assertIs(mdl_comp.foreign_ir_model, self.for_model)
+        self.assertIs(mdl_ir.domestic_ir_model, self.dom_model)
+        self.assertIs(mdl_ir.foreign_ir_model, self.for_model)
 
     def test_from_params(self) -> None:
         """Verify construction via TwoCurrencyFXParams and from_params."""

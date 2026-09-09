@@ -7,14 +7,10 @@ import numpy as np
 from tests.helpers.assertions import assert_mc_within_bounds
 from xvasim.models.fx.two_currency import TwoCurrencyFXModel
 from xvasim.models.ir.hull_white import HullWhite1FModel
-from xvasim.models.ir.lgm import LGMParams
 from xvasim.pricing_engine import (
-    FXLGMParams,
     SwapLegType,
     benchmark_price_cross_currency_swap,
-    benchmark_price_xccy_swap,
     price_cross_currency_swap,
-    price_xccy_swap,
 )
 from xvasim.qmc import RandomSequenceType
 
@@ -68,8 +64,8 @@ class TestCrossCurrencySwapPricing(unittest.TestCase):
         )
         self.assertIn("price", bm)
 
-        # Alias benchmark_price_xccy_swap
-        bm_alias = benchmark_price_xccy_swap(
+        # Verify with string leg types
+        bm_str = benchmark_price_cross_currency_swap(
             model=self.fx_model,
             tenor_yrs=5.0,
             domestic_leg_type="fixed",
@@ -79,7 +75,7 @@ class TestCrossCurrencySwapPricing(unittest.TestCase):
             foreign_notional=100000.0,
             exchange_notionals=True,
         )
-        self.assertEqual(bm["price"], bm_alias["price"])
+        self.assertEqual(bm["price"], bm_str["price"])
 
     def test_mc_xccy_pricing_fixed_float(self) -> None:
         """Verify MC cross currency swap pricing matches benchmark within statistical bounds."""
@@ -107,7 +103,7 @@ class TestCrossCurrencySwapPricing(unittest.TestCase):
 
     def test_mc_xccy_pricing_float_float(self) -> None:
         """Verify Float-Float cross currency swap with foreign FX basis spread."""
-        res = price_xccy_swap(
+        res = price_cross_currency_swap(
             model=self.fx_model,
             tenor_yrs=2.0,
             domestic_leg_type="floating",
@@ -126,32 +122,6 @@ class TestCrossCurrencySwapPricing(unittest.TestCase):
             res["analytical_benchmark_price"],
             num_std=3.5,
         )
-
-    def test_legacy_fx_lgm_params(self) -> None:
-        """Verify backwards compatibility with legacy FXLGMParams."""
-        dom_p = LGMParams(
-            0.03, np.array([30.0]), np.array([0.01]), self.tenors, self.dom_dfs
-        )
-        for_p = LGMParams(
-            0.04, np.array([30.0]), np.array([0.012]), self.tenors, self.for_dfs
-        )
-        legacy_params = FXLGMParams(
-            domestic=dom_p,
-            foreign=for_p,
-            spot_fx=1.15,
-            fx_vol_ann=0.12,
-            correlation_matrix=self.corr,
-        )
-        res = price_cross_currency_swap(
-            model=legacy_params,
-            tenor_yrs=2.0,
-            domestic_rate_ann=0.03,
-            domestic_notional=115000.0,
-            foreign_notional=100000.0,
-            n_paths=100,
-            seed=42,
-        )
-        self.assertIn("price", res)
 
 
 if __name__ == "__main__":

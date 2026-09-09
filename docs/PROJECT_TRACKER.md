@@ -9,11 +9,11 @@ Living status used by human and AI contributors to keep the project's progress v
 | Branch | `main` (in sync with `origin/main`) |
 | Package version | 0.1.0 |
 | Python | 3.14 (repo requires `>=3.14`) |
-| Tests | 195 passing (pytest), dual-runner compatible (unittest) |
-| Coverage | 97.8% (floor: 95.0%) |
+| Tests | 223 passing (pytest), dual-runner compatible (unittest) |
+| Coverage | 98.0% (floor: 95.0%) |
 | Ruff lint | clean |
 | Pyrefly type check | clean (0 errors) |
-| Last audit | 2026-09-08 |
+| Last audit | 2026-09-09 |
 
 ## Status Legend
 
@@ -34,6 +34,8 @@ Living status used by human and AI contributors to keep the project's progress v
 - **Pyrefly conformance** — removed redundant `float(...)` casts, modernized `@contextmanager` annotations across models/pricers (`6d1e59a`).
 - **Repo hygiene** — expanded `.gitignore`, untracked 107 `*.pyc` + `.coverage` (`62eeac6`, `837fc1e`).
 - **Agentic workflow & docs (this change)** — added `AGENTS.md` as the single source of truth, `docs/PROJECT_TRACKER.md`, `docs/FIXES_AND_COVERAGE.md`; removed `GEMINI.md` (reconciled into `AGENTS.md`); new no-legacy-compat policy.
+- **Test suite repair** — replaced legacy alias/param imports in 8 test modules to match canonical APIs; 194 tests green before XVA expansion.
+- **XVA suite expansion** — `compute_dva`, `compute_fva`, `compute_kva`, `compute_mva`, `compute_total_xva` plus ENE/FE exposure profile keys; FVA decomposed into symmetric FCA/FBA legs.
 
 ---
 
@@ -62,25 +64,28 @@ Living status used by human and AI contributors to keep the project's progress v
 - [x] Primary Monte Carlo pricers + analytical benchmarks for IRS, XCCY, FX forward/option, ZCIS, YoY, CPI option.
 - [x] Model-agnostic calibration (`calibrate_ir_model_to_swaptions`).
 - [x] `PricingResult` dual dict/attribute access.
-- [x] Decoupled multi-factor construction (`from_ir_models` / `from_components`).
+- [x] Decoupled multi-factor construction (`from_ir_models` / `from_params`).
 
 ### CVA Engine
 - [x] Path-wise chunked/numexpr CVA aggregation (`compute_cva`, `compute_cva_chunked`).
 - [x] Marginal PD from calibrated CIR credit curve (`compute_marginal_pd`).
-- [x] Exposure profiling (EE, EPE, Max PFE, quantile curves).
+- [x] Exposure profiling (EE, EPE, ENE, ENE scalar, funding exposure, Max PFE, quantile curves).
+- [x] DVA, FVA, KVA, MVA adjustments (`compute_dva`, `compute_fva`, `compute_kva`, `compute_mva`).
+- [x] FVA decomposed into symmetric legs: `compute_fva` returns `{fca, fba, fva}` (funding cost on EE + funding benefit on ENE); `compute_total_xva` reports both legs.
+- [x] Single-pass full XVA aggregation (`compute_total_xva`) returning component + total values.
 
 ### Quality, Tests & Hygiene
-- [x] 195 tests across unit / integration / benchmarks; dual pytest + unittest.
+- [x] 223 tests across unit / integration / benchmarks; dual pytest + unittest.
 - [x] Analytical-vs-MC and path-convergence benchmarks.
-- [x] 97.8% coverage (above 95.0% floor).
+- [x] 98.0% coverage (above 95.0% floor).
 - [x] Git hygiene: `*.pyc`, `.coverage`, caches untracked and ignored.
 
 ### Legacy Compatibility Cleanup (new policy)
-- [>] Remove the remaining legacy shim `FXLGMParams` (in `pricing_engine.py`) and normalize shim aliases across code, tests, exports, and docs per the `AGENTS.md` no-legacy policy. Model parameter dataclasses now have 1:1 model names (`CIRHazardRateParams`, `GarmanKohlhagenFXParams`, `TwoCurrencyFXParams`, ...).
-- [ ] Normalize aliases (`price_irs`, `price_fx_forward`, `benchmark_*`, `calibrate_lgm_to_swaptions`, `from_lgm_params`, etc.) to canonical names only.
+- [x] Removed the legacy shim `FXLGMParams`; source exports and tests already use only canonical names (`LGMParams`, `CIRHazardRateParams`, `GarmanKohlhagenFXParams`, `TwoCurrencyFXParams`, ...).
+- [x] Normalized aliases across code and tests (`price_irs`, `price_fx_forward`, `benchmark_*`, `calibrate_lgm_to_swaptions`, `from_lgm_params`, etc.) — no shorthand or legacy alias remains in `src/` or `tests/`.
 
 ### Backlog / Ideas
-- [ ] Additional XVA metrics: DVA, FVA, KVA, COLVA.
+- [ ] Additional XVA metrics: COLVA, collateral/FVA refinements (netting & collateral CSA modelling).
 - [ ] Model: two-factor Gaussian IR / multi-currency LGM extension.
 - [ ] Bermudan exceptions & exercise-boundary pricing.
 - [ ] Delta/Gamma/Vega bump-and-reval Greeks surface backed by `QMCSequenceGenerator`.
@@ -90,8 +95,9 @@ Living status used by human and AI contributors to keep the project's progress v
 
 ## Current Focus (In Progress)
 
-- Documentation & agentic workflow baseline (this change).
-- Next up: legacy compatibility removal epic (see Planned above).
+- XVA suite expansion landed (DVA/FVA/KVA/MVA/total aggregator, FVA decomposed into symmetric FCA/FBA legs); quality gates green at 223 tests / 98.0% coverage.
+- Legacy compatibility cleanup completed: no shorthand or deprecated aliases remain in `src/` or `tests/`; docs normalized.
+- Next up: backlog ideas — collateral/COLVA XVA, Greeks surface, YoY inflation benchmark, two-factor Gaussian IR model.
 
 ## How to Update
 

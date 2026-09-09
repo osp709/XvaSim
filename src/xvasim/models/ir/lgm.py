@@ -305,23 +305,6 @@ class LGMModel(InterestRateModel):
             pay_freq_yrs=pay_freq_yrs,
         )
 
-    def analytical_swaption_price(
-        self,
-        expiry_yrs: float,
-        swap_tenor_yrs: float,
-        market_normal_vol_ann: float,
-        fixed_rate_ann: float,
-        pay_freq_yrs: float = 0.5,
-    ) -> tuple[float, float]:
-        """Alias for :meth:`swaption_price_normal`."""
-        return self.swaption_price_normal(
-            expiry_yrs=expiry_yrs,
-            swap_tenor_yrs=swap_tenor_yrs,
-            market_normal_vol_ann=market_normal_vol_ann,
-            fixed_rate_ann=fixed_rate_ann,
-            pay_freq_yrs=pay_freq_yrs,
-        )
-
     @classmethod
     def calibrate_to_swaptions(
         cls,

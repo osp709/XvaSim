@@ -278,9 +278,6 @@ class GarmanKohlhagenFXModel(FXModel):
 
         return float(notional * price)
 
-    # Convenience alias for backwards compatibility & uniform interface
-    price_option_analytical = closed_form_option_price
-
     def simulate_paths(
         self,
         maturity_yrs: float,

@@ -14,9 +14,7 @@ from xvasim.pricing_engine import (
     _generate_swap_schedule,
     _parse_swap_leg_type,
     benchmark_price_interest_rate_swap,
-    benchmark_price_irs,
     price_interest_rate_swap,
-    price_irs,
 )
 from xvasim.qmc import RandomSequenceType
 
@@ -128,7 +126,7 @@ class TestSingleCurrencySwapPricing(unittest.TestCase):
         self.assertAlmostEqual(bm_at_fair["price"], 0.0, places=9)
 
         # Receiver swap (is_payer=False) is exact negative of payer swap
-        bm_receiver_res = benchmark_price_irs(
+        bm_receiver_res = benchmark_price_interest_rate_swap(
             model=self.hw_model,
             fixed_rate_ann=0.03,
             tenor_yrs=5.0,
@@ -161,26 +159,20 @@ class TestSingleCurrencySwapPricing(unittest.TestCase):
                 num_std=3.5,
             )
 
-    def test_alias_price_irs(self) -> None:
-        """Verify price_irs alias behaves identically to price_interest_rate_swap."""
-        res1 = price_irs(
-            model=self.hw_model,
-            fixed_rate_ann=0.03,
-            tenor_yrs=2.0,
-            n_paths=100,
-            seed=123,
-        )
-        res2 = price_interest_rate_swap(
-            model=self.hw_model,
-            fixed_rate_ann=0.03,
-            tenor_yrs=2.0,
-            n_paths=100,
-            seed=123,
-        )
-        self.assertEqual(res1["price"], res2["price"])
-        self.assertEqual(
-            res1["analytical_benchmark_price"], res2["analytical_benchmark_price"]
-        )
+    def test_mc_swap_all_models_receiver(self) -> None:
+        """Verify MC pricing for receiver swap across all models."""
+        models = [self.lgm_model, self.hw_model, self.vasicek_model, self.cir_model]
+        for mdl in models:
+            res = price_interest_rate_swap(
+                model=mdl,
+                fixed_rate_ann=0.03,
+                tenor_yrs=2.0,
+                is_payer=False,
+                n_paths=100,
+                seed=123,
+            )
+            self.assertIn("price", res)
+            self.assertIn("analytical_benchmark_price", res)
 
 
 if __name__ == "__main__":

@@ -83,7 +83,7 @@ class TestBlackInflationModel(unittest.TestCase):
         # Non-positive maturity swap rate
         self.assertEqual(self.model.zero_coupon_inflation_swap_rate(0.0), 0.0)
 
-    def test_price_cpi_option_analytical(self) -> None:
+    def test_price_consumer_price_index_option_analytical(self) -> None:
         """Verify Black analytical CPI caplet / floorlet pricing and put-call parity."""
         strike_rate = 0.020
         maturity = 5.0

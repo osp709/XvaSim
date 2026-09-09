@@ -268,9 +268,6 @@ class BlackInflationModel(InflationModel):
 
         return float(notional * pv)
 
-    # Convenience alias for backwards compatibility
-    price_cpi_option_analytical = price_consumer_price_index_option_analytical
-
     def simulate_paths(
         self,
         maturity_yrs: float,

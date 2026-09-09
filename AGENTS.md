@@ -134,7 +134,7 @@ The codebase implements model-agnostic abstractions and dispatchers (do not regr
 
 1. **IR**: `calibrate_ir_model_to_swaptions(..., model_type="lgm")` dispatches generically; `_swaption_price_normal` / `InterestRateModel.swaption_price_normal` provide analytical swaption pricing.
 2. **Credit**: `_calibrate_credit_model(spreads, tenors, model_type="cir")` and `_credit_model_survival_probability(tenors, model_or_params)` dispatch generically; `CreditModel.calibrate_from_spreads` enables self-calibration.
-3. **Multi-factor composition**: `TwoCurrencyFXModel.from_ir_models`/`from_components` and `JarrowYildirimModel.from_ir_models`/`from_components` build multi-currency/multi-economy models from arbitrary component models.
+3. **Multi-factor composition**: `TwoCurrencyFXModel.from_ir_models` and `JarrowYildirimModel.from_ir_models` build multi-currency/multi-economy models from arbitrary component models.
 4. **JIT dispatcher**: `simulate_model_paths_kernel(model_type, ...)` routes simulation stepping to the specialized kernel; generic `credit_survival_probability_kernel` / `credit_calibration_objective_kernel` for credit.
 5. **Pricing result**: `PricingResult` subclasses `dict[str, Any]` with dual dict/attribute access (`res["price"]` and `res.price`); all pricers accept `model: ... | None = None` (or `params` fallback).
 
@@ -159,7 +159,7 @@ Simulation return contracts: IR `simulate_paths(times, n_paths, ...)` returns an
 
 ## No Legacy Preservation
 
-- Do NOT preserve backwards compatibility with deprecated parameter dataclasses, deprecated registry keys, or deprecated aliases. `FXLGMParams` (still present in `pricing_engine.py`) is the remaining legacy shim — it is slated for removal per `docs/PROJECT_TRACKER.md`; never add new usages. The current parameter dataclasses (`LGMParams`, `HullWhite1FParams`, `VasicekParams`, `CIRInterestRateParams`, `CIRHazardRateParams`, `GarmanKohlhagenFXParams`, `HestonFXParams`, `TwoCurrencyFXParams`, `JarrowYildirimParams`, `BlackInflationParams`) are canonical, first-class API — never wrap them in legacy shims.
+- Do NOT preserve backwards compatibility with deprecated parameter dataclasses, deprecated registry keys, or deprecated aliases. The legacy `FXLGMParams` shim has been removed from `pricing_engine.py`; do not reintroduce it. The current parameter dataclasses (`LGMParams`, `HullWhite1FParams`, `VasicekParams`, `CIRInterestRateParams`, `CIRHazardRateParams`, `GarmanKohlhagenFXParams`, `HestonFXParams`, `TwoCurrencyFXParams`, `JarrowYildirimParams`, `BlackInflationParams`) are canonical, first-class API — never wrap them in legacy shims.
 - When an interface changes, update every caller, export, test, and docs file to the latest API in the same change.
 - Remove obsolete shims instead of wrapping them.
 

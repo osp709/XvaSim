@@ -10,45 +10,34 @@ This module implements analytical and Monte Carlo derivative pricing for:
 All pricing routines operate on abstract model interfaces
 (:class:`~xvasim.models.base.InterestRateModel`,
 :class:`~xvasim.models.base.FXModel`,
-:class:`~xvasim.models.base.InflationModel`) while maintaining full backwards
-compatibility with legacy parameter dataclasses (:class:`LGMParams`,
-:class:`FXLGMParams`).
+:class:`~xvasim.models.base.InflationModel`) while remaining compatible with
+the canonical parameter dataclasses (:class:`LGMParams`,
+:class:`GarmanKohlhagenFXParams`, :class:`HestonFXParams`,
+:class:`TwoCurrencyFXParams`).
 
 Public API
 ----------
 - :class:`PricingResult` — result container supporting dictionary and attribute access.
 - :class:`LGMParams` — single-currency calibrated LGM parameters (re-exported).
-- :class:`FXLGMParams` — two-currency + FX spot model parameters.
 - :class:`OptionType` — enumeration of supported option types.
 - :class:`SwapLegType` — enumeration of supported swap leg types.
-- :func:`calibrate_ir_model_to_swaptions` (alias
-  ``calibrate_lgm_to_swaptions``) — calibrate interest rate model ``σ(t)`` to swaptions.
-- :func:`price_foreign_exchange_forward` (alias ``price_fx_forward``) —
-  price a currency forward.
-- :func:`benchmark_price_foreign_exchange_forward`
-  (alias ``benchmark_price_fx_forward``) — closed-form forward price.
-- :func:`price_foreign_exchange_option` (alias ``price_fx_option``) —
-  price a European currency option.
-- :func:`benchmark_price_foreign_exchange_option`
-  (alias ``benchmark_price_fx_option``) — analytical option benchmark.
-- :func:`price_interest_rate_swap` (alias ``price_irs``) —
-  price single-currency IRS.
-- :func:`benchmark_price_interest_rate_swap` (alias ``benchmark_price_irs``) —
-  analytical IRS benchmark.
-- :func:`price_cross_currency_swap` (alias ``price_xccy_swap``) —
-  price cross-currency swap.
-- :func:`benchmark_price_cross_currency_swap` (alias
-  ``benchmark_price_xccy_swap``) — analytical XCCY benchmark.
-- :func:`price_zero_coupon_inflation_swap` —
-  price zero-coupon inflation swaps.
-- :func:`benchmark_price_zero_coupon_inflation_swap` —
-  analytical ZCIS benchmark.
-- :func:`price_year_on_year_inflation_swap` (alias
-  ``price_yoy_inflation_swap``) — price year-on-year inflation swaps.
-- :func:`price_consumer_price_index_option` (alias ``price_cpi_option``) —
-  price European CPI index options / inflation caps & floors.
-- :func:`benchmark_price_consumer_price_index_option`
-  (alias ``benchmark_price_cpi_option``) — analytical CPI option benchmark.
+- :func:`calibrate_ir_model_to_swaptions` — calibrate interest rate model ``σ(t)``
+  to swaptions.
+- :func:`price_foreign_exchange_forward` — price a currency forward.
+- :func:`benchmark_price_foreign_exchange_forward` — closed-form forward price.
+- :func:`price_foreign_exchange_option` — price a European currency option.
+- :func:`benchmark_price_foreign_exchange_option` — analytical option benchmark.
+- :func:`price_interest_rate_swap` — price single-currency IRS.
+- :func:`benchmark_price_interest_rate_swap` — analytical IRS benchmark.
+- :func:`price_cross_currency_swap` — price cross-currency swap.
+- :func:`benchmark_price_cross_currency_swap` — analytical XCCY benchmark.
+- :func:`price_zero_coupon_inflation_swap` — price zero-coupon inflation swaps.
+- :func:`benchmark_price_zero_coupon_inflation_swap` — analytical ZCIS benchmark.
+- :func:`price_year_on_year_inflation_swap` — price year-on-year inflation swaps.
+- :func:`price_consumer_price_index_option` — price European CPI index options
+  and inflation caps / floors.
+- :func:`benchmark_price_consumer_price_index_option` — analytical CPI option
+  benchmark.
 
 Units & Conventions
 -------------------
@@ -58,7 +47,6 @@ Units & Conventions
 
 from __future__ import annotations
 
-import dataclasses
 import enum
 import typing
 
@@ -79,58 +67,25 @@ from .models.ir.lgm import LGMModel, LGMParams
 from .qmc import RandomSequenceType
 
 __all__ = [
-    "FXLGMParams",
     "LGMParams",
     "OptionType",
     "PricingResult",
     "SwapLegType",
     "benchmark_price_consumer_price_index_option",
-    "benchmark_price_cpi_option",
     "benchmark_price_cross_currency_swap",
     "benchmark_price_foreign_exchange_forward",
     "benchmark_price_foreign_exchange_option",
-    "benchmark_price_fx_forward",
-    "benchmark_price_fx_option",
     "benchmark_price_interest_rate_swap",
-    "benchmark_price_irs",
-    "benchmark_price_xccy_swap",
     "benchmark_price_zero_coupon_inflation_swap",
     "calibrate_ir_model_to_swaptions",
-    "calibrate_lgm_to_swaptions",
     "price_consumer_price_index_option",
-    "price_cpi_option",
     "price_cross_currency_swap",
     "price_foreign_exchange_forward",
     "price_foreign_exchange_option",
-    "price_fx_forward",
-    "price_fx_option",
     "price_interest_rate_swap",
-    "price_irs",
-    "price_xccy_swap",
     "price_year_on_year_inflation_swap",
-    "price_yoy_inflation_swap",
     "price_zero_coupon_inflation_swap",
 ]
-
-
-@dataclasses.dataclass(frozen=True)
-class FXLGMParams:
-    """Two-currency LGM model parameters for FX derivative pricing.
-
-    Attributes:
-        domestic: LGM parameters for the domestic (numeraire) currency.
-        foreign: LGM parameters for the foreign currency.
-        spot_fx: Current spot FX rate (units of domestic per 1 foreign).
-        fx_vol_ann: Annualised log-normal volatility of the FX spot rate.
-        correlation_matrix: 3×3 correlation matrix ordered as
-            ``[domestic_rate, foreign_rate, fx_spot]``.
-    """
-
-    domestic: LGMParams
-    foreign: LGMParams
-    spot_fx: float
-    fx_vol_ann: float
-    correlation_matrix: np.ndarray
 
 
 # ---------------------------------------------------------------------------
@@ -233,33 +188,23 @@ class PricingResult(dict[str, typing.Any]):
 def _resolve_fx_model(
     model: (
         FXModel
-        | FXLGMParams
         | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
     ) = None,
     params: (
         FXModel
-        | FXLGMParams
         | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
     ) = None,
 ) -> FXModel:
-    """Resolve an FXModel or convert legacy FXLGMParams / parameter dataclasses."""
+    """Resolve an FXModel or convert an FX parameter dataclass."""
     target = model if model is not None else params
     if target is None:
         raise ValueError("Must provide 'model' (or 'params').")
     if isinstance(target, FXModel):
         return target
-    elif isinstance(target, FXLGMParams):
-        return TwoCurrencyFXModel.from_ir_models(
-            domestic=target.domestic,
-            foreign=target.foreign,
-            spot_fx=target.spot_fx,
-            fx_vol_ann=target.fx_vol_ann,
-            correlation_matrix=target.correlation_matrix,
-        )
     elif isinstance(target, GarmanKohlhagenFXParams):
         return GarmanKohlhagenFXModel.from_params(target)
     elif isinstance(target, HestonFXParams):
@@ -273,7 +218,7 @@ def _resolve_fx_model(
 
 
 def _get_ir_model(model: InterestRateModel | LGMParams) -> InterestRateModel:
-    """Wrap legacy LGMParams in LGMModel if necessary."""
+    """Wrap LGMParams in LGMModel if necessary."""
     if isinstance(model, InterestRateModel):
         return model
     elif isinstance(model, LGMParams):
@@ -458,9 +403,6 @@ def _swaption_price_normal(
     return float(model_price), float(market_price)
 
 
-_lgm_swaption_price_normal = _swaption_price_normal
-
-
 def calibrate_ir_model_to_swaptions(
     swaption_expiries_yrs: np.ndarray,
     swap_tenors_yrs: np.ndarray,
@@ -555,62 +497,9 @@ def calibrate_ir_model_to_swaptions(
     )
 
 
-calibrate_lgm_to_swaptions = calibrate_ir_model_to_swaptions
-
-
 # ---------------------------------------------------------------------------
 # Monte Carlo simulation helpers (Retained for backwards compatibility)
 # ---------------------------------------------------------------------------
-
-
-def _simulate_fx_paths(
-    params: FXLGMParams,
-    maturity_yrs: float,
-    n_paths: int,
-    n_steps: int,
-    rng: np.random.Generator | None = None,
-    random_type: RandomSequenceType | str = RandomSequenceType.PSEUDO,
-    seed: int | None = None,
-    scramble: bool = True,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Simulate FX and short-rate state paths under the domestic measure.
-
-    Three correlated Brownian drivers are evolved on a uniform time grid:
-      1. Domestic LGM state ``x_d(t)``
-      2. Foreign LGM state ``x_f(t)``
-      3. Log-FX process ``ln S(t)``
-
-    Args:
-        params: Two-currency model parameters.
-        maturity_yrs: Simulation horizon (years).
-        n_paths: Number of Monte Carlo paths.
-        n_steps: Number of time steps.
-        rng: Optional NumPy random Generator for reproducibility.
-        random_type: Sequence type (:class:`RandomSequenceType` or str).
-        seed: Optional random seed.
-        scramble: If True, scrambles QMC sequences.
-
-    Returns:
-        ``(times, x_dom, x_for, fx_spot)`` — all arrays of shape
-        ``(n_paths, n_steps + 1)`` except *times* which is
-        ``(n_steps + 1,)``.
-    """
-    model = TwoCurrencyFXModel.from_ir_models(
-        domestic=params.domestic,
-        foreign=params.foreign,
-        spot_fx=params.spot_fx,
-        fx_vol_ann=params.fx_vol_ann,
-        correlation_matrix=params.correlation_matrix,
-    )
-    return model.simulate_paths(
-        maturity_yrs=maturity_yrs,
-        n_paths=n_paths,
-        n_steps=n_steps,
-        rng=rng,
-        random_type=random_type,
-        seed=seed,
-        scramble=scramble,
-    )
 
 
 def _discount_path(
@@ -656,7 +545,6 @@ def _instantaneous_forward(
 def benchmark_price_foreign_exchange_forward(
     model: (
         FXModel
-        | FXLGMParams
         | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
@@ -667,7 +555,6 @@ def benchmark_price_foreign_exchange_forward(
     *,
     params: (
         FXModel
-        | FXLGMParams
         | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
@@ -677,11 +564,11 @@ def benchmark_price_foreign_exchange_forward(
 
     Args:
         model: Foreign exchange model, either an instantiated
-            :class:`~xvasim.models.base.FXModel` or legacy :class:`FXLGMParams`.
+            :class:`~xvasim.models.base.FXModel` or a supported FX parameter dataclass.
         strike: Forward strike (domestic per foreign).
         maturity_yrs: Maturity in years.
         notional: Notional amount in foreign currency.
-        params: Backwards-compatible alias for *model*.
+        params: Alternative to *model*: a supported parameter dataclass or params dict.
 
     Returns:
         :class:`PricingResult` with ``"price"``, ``"forward_fx"``, ``"domestic_df"``,
@@ -717,15 +604,9 @@ def benchmark_price_foreign_exchange_forward(
         foreign_df=df_f,
     )
 
-
-# Convenience alias for foreign exchange forward benchmark pricing
-benchmark_price_fx_forward = benchmark_price_foreign_exchange_forward
-
-
 def price_foreign_exchange_forward(
     model: (
         FXModel
-        | FXLGMParams
         | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
@@ -741,7 +622,6 @@ def price_foreign_exchange_forward(
     *,
     params: (
         FXModel
-        | FXLGMParams
         | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
@@ -754,7 +634,7 @@ def price_foreign_exchange_forward(
 
     Args:
         model: Foreign exchange model, either an instantiated
-            :class:`~xvasim.models.base.FXModel` or legacy :class:`FXLGMParams`.
+            :class:`~xvasim.models.base.FXModel` or a supported FX parameter dataclass.
         strike: Forward strike (domestic per foreign).
         maturity_yrs: Maturity in years.
         notional: Notional amount in foreign currency.
@@ -763,7 +643,7 @@ def price_foreign_exchange_forward(
         seed: Random seed (``None`` for non-deterministic).
         random_type: Sequence type (:class:`RandomSequenceType` or str).
         scramble: If True, applies scrambling to QMC sequences.
-        params: Backwards-compatible alias for *model*.
+        params: Alternative to *model*: a supported parameter dataclass or params dict.
 
     Returns:
         :class:`PricingResult` with keys:
@@ -822,15 +702,9 @@ def price_foreign_exchange_forward(
         fx_terminal=s_t,
     )
 
-
-# Convenience alias for foreign exchange forward pricing
-price_fx_forward = price_foreign_exchange_forward
-
-
 def benchmark_price_foreign_exchange_option(
     model: (
         FXModel
-        | FXLGMParams
         | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
@@ -842,7 +716,6 @@ def benchmark_price_foreign_exchange_option(
     *,
     params: (
         FXModel
-        | FXLGMParams
         | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
@@ -856,12 +729,12 @@ def benchmark_price_foreign_exchange_option(
 
     Args:
         model: Foreign exchange model, either an instantiated
-            :class:`~xvasim.models.base.FXModel` or legacy :class:`FXLGMParams`.
+            :class:`~xvasim.models.base.FXModel` or a supported FX parameter dataclass.
         strike: Option strike (domestic per foreign).
         maturity_yrs: Expiry in years.
         notional: Notional in foreign currency.
         option_type: :class:`OptionType` member or string (``'call'`` / ``'put'``).
-        params: Backwards-compatible alias for *model*.
+        params: Alternative to *model*: a supported parameter dataclass or params dict.
 
     Returns:
         :class:`PricingResult` containing benchmark ``"price"`` and diagnostics.
@@ -886,17 +759,6 @@ def benchmark_price_foreign_exchange_option(
 
     is_call = resolved is OptionType.CALL
     fx_model = _resolve_fx_model(model=model, params=params)
-
-    if hasattr(fx_model, "price_option_analytical"):
-        res = fx_model.price_option_analytical(
-            strike=strike,
-            maturity_yrs=maturity_yrs,
-            notional=notional,
-            option_type=resolved,
-        )
-        if isinstance(res, dict):
-            return PricingResult({k: float(v) for k, v in res.items()})
-        return PricingResult(price=float(res))
 
     if hasattr(fx_model, "closed_form_option_price"):
         opt_str = (
@@ -953,15 +815,9 @@ def benchmark_price_foreign_exchange_option(
     msg = f"Analytical benchmark not supported for {type(fx_model).__name__}"
     raise TypeError(msg)
 
-
-# Convenience alias for foreign exchange option benchmark pricing
-benchmark_price_fx_option = benchmark_price_foreign_exchange_option
-
-
 def price_foreign_exchange_option(
     model: (
         FXModel
-        | FXLGMParams
         | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
@@ -978,7 +834,6 @@ def price_foreign_exchange_option(
     *,
     params: (
         FXModel
-        | FXLGMParams
         | GarmanKohlhagenFXParams
         | HestonFXParams
         | None
@@ -993,7 +848,7 @@ def price_foreign_exchange_option(
 
     Args:
         model: Foreign exchange model, either an instantiated
-            :class:`~xvasim.models.base.FXModel` or legacy :class:`FXLGMParams`.
+            :class:`~xvasim.models.base.FXModel` or a supported FX parameter dataclass.
         strike: Option strike (domestic per foreign).
         maturity_yrs: Expiry in years.
         notional: Notional in foreign currency.
@@ -1005,7 +860,7 @@ def price_foreign_exchange_option(
         seed: Random seed.
         random_type: Random sequence type (:class:`RandomSequenceType` or str).
         scramble: If True, applies scrambling to QMC sequences.
-        params: Backwards-compatible alias for *model*.
+        params: Alternative to *model*: a supported parameter dataclass or params dict.
 
     Returns:
         :class:`PricingResult` with keys:
@@ -1098,11 +953,6 @@ def price_foreign_exchange_option(
         res_dict["analytical_benchmark_price"] = ana_price
 
     return PricingResult(res_dict)
-
-
-# Convenience alias for foreign exchange option pricing
-price_fx_option = price_foreign_exchange_option
-
 
 # ---------------------------------------------------------------------------
 # Inflation Pricing Engine
@@ -1330,11 +1180,6 @@ def price_year_on_year_inflation_swap(
         period_cash_flows=period_pvs,
     )
 
-
-# Convenience alias for year-on-year inflation swap pricing
-price_yoy_inflation_swap = price_year_on_year_inflation_swap
-
-
 def benchmark_price_consumer_price_index_option(
     model: InflationModel,
     strike_rate_ann: float,
@@ -1435,11 +1280,6 @@ def benchmark_price_consumer_price_index_option(
         forward_cpi=forward_cpi_val,
     )
 
-
-# Convenience alias for CPI option benchmark pricing
-benchmark_price_cpi_option = benchmark_price_consumer_price_index_option
-
-
 def price_consumer_price_index_option(
     model: InflationModel,
     strike_rate_ann: float,
@@ -1528,11 +1368,6 @@ def price_consumer_price_index_option(
         forward_cpi=ana_res["forward_cpi"],
     )
 
-
-# Convenience alias for CPI option pricing
-price_cpi_option = price_consumer_price_index_option
-
-
 # ---------------------------------------------------------------------------
 # Interest Rate Swap & Cross-Currency Swap Pricing
 # ---------------------------------------------------------------------------
@@ -1599,7 +1434,7 @@ def benchmark_price_interest_rate_swap(
 
     Args:
         model: An instantiated :class:`~xvasim.models.base.InterestRateModel`
-            or legacy :class:`~xvasim.models.ir.lgm.LGMParams`.
+            or an :class:`~xvasim.models.ir.lgm.LGMParams` parameter dataclass.
         fixed_rate_ann: Annualised fixed coupon rate :math:`K` (e.g. 0.03 for 3%).
         tenor_yrs: Total swap tenor in years (used if *payment_times_yrs* is None).
         payment_times_yrs: Custom array or list of payment dates in years.
@@ -1623,11 +1458,6 @@ def benchmark_price_interest_rate_swap(
         is_payer=is_payer,
         n_paths=None,
     )
-
-
-# Convenience alias for benchmark interest rate swaps
-benchmark_price_irs = benchmark_price_interest_rate_swap
-
 
 def price_interest_rate_swap(
     model: InterestRateModel | LGMParams,
@@ -1661,7 +1491,7 @@ def price_interest_rate_swap(
             :class:`~xvasim.models.ir.HullWhite1FModel`,
             :class:`~xvasim.models.ir.VasicekModel`,
             :class:`~xvasim.models.ir.CIRInterestRateModel`)
-            or legacy :class:`~xvasim.models.ir.lgm.LGMParams`.
+            or an :class:`~xvasim.models.ir.lgm.LGMParams` parameter dataclass.
         fixed_rate_ann: Annualised fixed coupon rate :math:`K` (e.g. 0.03 for 3%).
         tenor_yrs: Total swap tenor in years (used if *payment_times_yrs* is None).
         payment_times_yrs: Custom array or list of payment dates in years.
@@ -1821,13 +1651,8 @@ def price_interest_rate_swap(
         period_cash_flows=period_cfs,
     )
 
-
-# Convenience alias for interest rate swaps
-price_irs = price_interest_rate_swap
-
-
 def benchmark_price_cross_currency_swap(
-    model: TwoCurrencyFXModel | FXLGMParams | FXModel,
+    model: TwoCurrencyFXModel | FXModel,
     domestic_rate_ann: float = 0.0,
     foreign_rate_ann: float = 0.0,
     domestic_spread_ann: float = 0.0,
@@ -1849,9 +1674,9 @@ def benchmark_price_cross_currency_swap(
     Fixed-for-Floating, Fixed-for-Fixed, or Floating-for-Floating (basis swap).
 
     Args:
-        model: A :class:`~xvasim.models.fx.TwoCurrencyFXModel`, legacy
-            :class:`FXLGMParams`, or a modular :class:`~xvasim.models.base.FXModel`
-            with domestic and foreign interest rate models.
+        model: A :class:`~xvasim.models.fx.TwoCurrencyFXModel` or a modular
+            :class:`~xvasim.models.base.FXModel` with domestic and foreign
+            interest rate models.
         domestic_rate_ann: Annualised fixed coupon on domestic leg (if fixed).
         foreign_rate_ann: Annualised fixed coupon on foreign leg (if fixed).
         domestic_spread_ann: Annualised spread on domestic floating rate (if floating).
@@ -1892,13 +1717,8 @@ def benchmark_price_cross_currency_swap(
         n_paths=None,
     )
 
-
-# Convenience alias for cross-currency swap analytical benchmark
-benchmark_price_xccy_swap = benchmark_price_cross_currency_swap
-
-
 def price_cross_currency_swap(
-    model: TwoCurrencyFXModel | FXLGMParams | FXModel,
+    model: TwoCurrencyFXModel | FXModel,
     domestic_rate_ann: float = 0.0,
     foreign_rate_ann: float = 0.0,
     domestic_spread_ann: float = 0.0,
@@ -1928,9 +1748,9 @@ def price_cross_currency_swap(
     - **Floating vs. Floating** (Cross-currency basis swap)
 
     Args:
-        model: A :class:`~xvasim.models.fx.TwoCurrencyFXModel`, legacy
-            :class:`FXLGMParams`, or a modular :class:`~xvasim.models.base.FXModel`
-            with domestic and foreign interest rate models.
+        model: A :class:`~xvasim.models.fx.TwoCurrencyFXModel` or a modular
+            :class:`~xvasim.models.base.FXModel` with domestic and foreign
+            interest rate models.
         domestic_rate_ann: Annualised fixed coupon on domestic leg (if fixed).
         foreign_rate_ann: Annualised fixed coupon on foreign leg (if fixed).
         domestic_spread_ann: Annualised spread on domestic floating rate (if floating).
@@ -1974,15 +1794,7 @@ def price_cross_currency_swap(
         - ``"std_error"`` — Monte Carlo standard error (if ``n_paths`` is provided).
         - ``"analytical_benchmark_price"`` — Exact analytical benchmark price.
     """
-    if isinstance(model, FXLGMParams):
-        fx_model = TwoCurrencyFXModel.from_ir_models(
-            domestic=model.domestic,
-            foreign=model.foreign,
-            spot_fx=model.spot_fx,
-            fx_vol_ann=model.fx_vol_ann,
-            correlation_matrix=model.correlation_matrix,
-        )
-    elif isinstance(model, TwoCurrencyFXModel):
+    if isinstance(model, TwoCurrencyFXModel):
         fx_model = model
     elif (
         isinstance(model, FXModel)
@@ -1992,7 +1804,7 @@ def price_cross_currency_swap(
         fx_model = typing.cast(TwoCurrencyFXModel, model)
     else:
         msg = (
-            f"model must be TwoCurrencyFXModel, FXLGMParams, or FXModel "
+            f"model must be TwoCurrencyFXModel or FXModel "
             f"with domestic/foreign IR models, got {type(model).__name__}"
         )
         raise TypeError(msg)
@@ -2209,7 +2021,3 @@ def price_cross_currency_swap(
     base_result["analytical_benchmark_price"] = price_analytical
 
     return PricingResult(base_result)
-
-
-# Convenience alias for cross-currency swaps
-price_xccy_swap = price_cross_currency_swap

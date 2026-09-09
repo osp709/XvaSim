@@ -26,14 +26,15 @@ The following table summarizes all financial instruments and valuation adjustmen
 
 | Security / Instrument | Asset Class / Category | Primary MC Pricer (`price_*`) | Analytical Benchmark (`benchmark_price_*`) | Simulated Risk Factors | Description & Payoff Structure |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Vanilla Interest Rate Swap (IRS)** | Rates | `price_interest_rate_swap` / `price_irs` | `benchmark_price_interest_rate_swap` / `benchmark_price_irs` | Domestic Interest Rate $r_d(t)$ | Single-currency fixed-for-floating interest rate swap. Pays fixed/floating coupons on preset schedule. Computes par swap rate & forward annuity (PV01). |
-| **Cross-Currency Swap (XCCY)** | Rates / FX | `price_cross_currency_swap` / `price_xccy_swap` | `benchmark_price_cross_currency_swap` / `benchmark_price_xccy_swap` | Domestic IR $r_d(t)$, Foreign IR $r_f(t)$, Spot FX $S(t)$ | Multi-currency swap supporting fixed-for-floating, fixed-for-fixed, and floating-for-floating basis swaps with optional principal notional exchanges. |
-| **FX Forward** | FX | `price_fx_forward` | `benchmark_price_fx_forward` | Domestic IR $r_d(t)$, Foreign IR $r_f(t)$, Spot FX $S(t)$ | Forward exchange contract: $N \times (S(T) - K)$ priced under domestic risk-neutral measure with Covered Interest Parity (CIP) benchmark. |
-| **European FX Option (Call / Put)** | FX | `price_fx_option` | `benchmark_price_fx_option` | Spot FX $S(t)$, Domestic IR $r_d(t)$, Foreign IR $r_f(t)$, FX Variance $v(t)$ (Heston) | Vanilla European option on FX spot: $N \times \max(\omega(S(T) - K), 0)$ benchmarked against Garman-Kohlhagen / Black-76 / Heston semi-analytical formulas. |
+| **Vanilla Interest Rate Swap (IRS)** | Rates | `price_interest_rate_swap` | `benchmark_price_interest_rate_swap` | Domestic Interest Rate $r_d(t)$ | Single-currency fixed-for-floating interest rate swap. Pays fixed/floating coupons on preset schedule. Computes par swap rate & forward annuity (PV01). |
+| **Cross-Currency Swap (XCCY)** | Rates / FX | `price_cross_currency_swap` | `benchmark_price_cross_currency_swap` | Domestic IR $r_d(t)$, Foreign IR $r_f(t)$, Spot FX $S(t)$ | Multi-currency swap supporting fixed-for-floating, fixed-for-fixed, and floating-for-floating basis swaps with optional principal notional exchanges. |
+| **FX Forward** | FX | `price_foreign_exchange_forward` | `benchmark_price_foreign_exchange_forward` | Domestic IR $r_d(t)$, Foreign IR $r_f(t)$, Spot FX $S(t)$ | Forward exchange contract: $N \times (S(T) - K)$ priced under domestic risk-neutral measure with Covered Interest Parity (CIP) benchmark. |
+| **European FX Option (Call / Put)** | FX | `price_foreign_exchange_option` | `benchmark_price_foreign_exchange_option` | Spot FX $S(t)$, Domestic IR $r_d(t)$, Foreign IR $r_f(t)$, FX Variance $v(t)$ (Heston) | Vanilla European option on FX spot: $N \times \max(\omega(S(T) - K), 0)$ benchmarked against Garman-Kohlhagen / Black-76 / Heston semi-analytical formulas. |
 | **Zero-Coupon Inflation Swap (ZCIS)** | Inflation | `price_zero_coupon_inflation_swap` | `benchmark_price_zero_coupon_inflation_swap` | Nominal IR $r_n(t)$, Real IR $r_r(t)$, CPI Index $I(t)$ | Single-exchange swap at maturity: pays fixed compounded rate $(1+K)^T - 1$ vs floating realized inflation index return $I(T)/I(0) - 1$. |
-| **Year-on-Year Inflation Swap (YoY)** | Inflation | `price_yoy_inflation_swap` | Interpolated CPI forward projection | Nominal IR $r_n(t)$, Real IR $r_r(t)$, CPI Index $I(t)$ | Multi-period swap exchanging annual fixed rate $K$ for annual CPI growth $\frac{I(T_i)}{I(T_{i-1})} - 1$ on each reset date. |
-| **CPI Index Option (Caplet / Floorlet)** | Inflation | `price_cpi_option` | `benchmark_price_cpi_option` | Nominal IR $r_n(t)$, Real IR $r_r(t)$, CPI Index $I(t)$ | European option on inflation index: Caplet $N \times \max\left(\frac{I(T)}{I(0)} - (1+K)^T, 0\right)$ and Floorlet $N \times \max\left((1+K)^T - \frac{I(T)}{I(0)}, 0\right)$. |
+| **Year-on-Year Inflation Swap (YoY)** | Inflation | `price_year_on_year_inflation_swap` | Interpolated CPI forward projection | Nominal IR $r_n(t)$, Real IR $r_r(t)$, CPI Index $I(t)$ | Multi-period swap exchanging annual fixed rate $K$ for annual CPI growth $\frac{I(T_i)}{I(T_{i-1})} - 1$ on each reset date. |
+| **CPI Index Option (Caplet / Floorlet)** | Inflation | `price_consumer_price_index_option` | `benchmark_price_consumer_price_index_option` | Nominal IR $r_n(t)$, Real IR $r_r(t)$, CPI Index $I(t)$ | European option on inflation index: Caplet $N \times \max\left(\frac{I(T)}{I(0)} - (1+K)^T, 0\right)$ and Floorlet $N \times \max\left((1+K)^T - \frac{I(T)}{I(0)}, 0\right)$. |
 | **Portfolio Credit Valuation Adjustment (CVA)** | Credit / Multi-Asset | `compute_cva` | Marginal PD via CIR zero-curve | Credit Hazard Rate $\lambda(t)$, Underlying Portfolio Exposure | Path-wise Monte Carlo integration of counterparty default risk across simulated market exposure paths, discount factors, and marginal default probabilities. |
+| **XVA Suite (DVA/FVA/KVA/MVA)** | Credit / Multi-Asset | `compute_dva`, `compute_fva`, `compute_kva`, `compute_mva`, `compute_total_xva` | Marginal PD via CIR zero-curve | Credit Hazard Rate, Exposure, Discount Factors | Debt, funding, capital, and initial-margin valuation adjustments with a single-pass `compute_total_xva` aggregator covering both sides of the trade and the CCAR capital charge. |
 
 ---
 
@@ -62,7 +63,7 @@ Every model can be constructed from its parameter dataclass (`params=...`) or fr
 
 **Interest rate models (`xvasim.models.ir`)** — subclass `InterestRateModel`; all expose the discount-curve properties `discount_curve_yrs` / `discount_factors`, the curve helpers `interpolate_discount_factor(t)` and `instantaneous_forward(t)`, plus `short_rate(t, state)`, `zero_coupon_bond(t, T, state)`, `discount_path(times, state_paths)`, and `simulate_paths(times, n_paths, ...)`.
 
-- `LGMModel` — `(params=None, *, kappa_ann=0.03, sigma_grid_yrs, sigma_values_ann, discount_curve_yrs, discount_factors)`. Piecewise-constant volatility $\sigma(t)$; helpers `h_function(t)`, `zeta(t)`, `sigma_at(t)`; analytical swaption pricing `swaption_price_normal(...)` / alias `analytical_swaption_price(...)`; classmethod `calibrate_to_swaptions(...)`. Dataclass `LGMParams`.
+- `LGMModel` — `(params=None, *, kappa_ann=0.03, sigma_grid_yrs, sigma_values_ann, discount_curve_yrs, discount_factors)`. Piecewise-constant volatility $\sigma(t)$; helpers `h_function(t)`, `zeta(t)`, `sigma_at(t)`; analytical swaption pricing `swaption_price_normal(...)`; classmethod `calibrate_to_swaptions(...)`. Dataclass `LGMParams`.
 - `HullWhite1FModel` — `(params=None, *, a_ann=0.03, sigma_ann=0.01, discount_curve_yrs, discount_factors)`. Helpers `b_function(t, T)`, `alpha(t)`. Dataclass `HullWhite1FParams`.
 - `VasicekModel` — `(params=None, *, kappa_ann=0.15, theta_ann=0.03, sigma_ann=0.015, r0_ann=0.025, discount_curve_yrs=None, discount_factors=None)`. When no curve is supplied, an analytical model-implied term structure is generated. Dataclass `VasicekParams`.
 - `CIRInterestRateModel` — `(params=None, *, kappa_ann=0.20, theta_ann=0.03, sigma_ann=0.08, r0_ann=0.025, discount_curve_yrs=None, discount_factors=None)`. Simulation uses full truncation (states clamped at 0); non-negative when the Feller condition $2\kappa\theta \ge \sigma^2$ holds. Dataclass `CIRInterestRateParams`.
@@ -73,14 +74,14 @@ Every model can be constructed from its parameter dataclass (`params=...`) or fr
 
 **FX models (`xvasim.models.fx`)** — subclass `FXModel`. `simulate_paths(maturity_yrs, n_paths, n_steps, ...)` returns the tuple `(times, x_dom, x_for, fx_spot)` (for Heston, `(times, v_paths, x_dummy, fx_spot)`).
 
-- `TwoCurrencyFXModel` — `(domestic_ir_model, foreign_ir_model, spot_fx, fx_vol_ann, correlation_matrix)`; IR components may be `InterestRateModel` instances or `LGMParams`. Constructors `from_params(...)`, `from_ir_models(...)`, `from_components(...)`, `from_lgm_params(...)`. Quanto drift $\rho_{f,S}\sigma_f\sigma_{fx}$ applied to the foreign rate under the domestic measure. Dataclass `TwoCurrencyFXParams`.
-- `GarmanKohlhagenFXModel` — `(params=None, *, spot_fx=1.0, fx_vol_ann=0.10, domestic_rate_ann=0.0, foreign_rate_ann=0.0, discount_curve_domestic_yrs=None, discount_factors_domestic=None, discount_curve_foreign_yrs=None, discount_factors_foreign=None)`. Curve-override-capable `domestic_discount_factor(t)` / `foreign_discount_factor(t)`, `forward_rate(T)`, closed-form `closed_form_option_price(...)` (`price_option_analytical` alias); `from_params(...)`. Dataclass `GarmanKohlhagenFXParams`.
+- `TwoCurrencyFXModel` — `(domestic_ir_model, foreign_ir_model, spot_fx, fx_vol_ann, correlation_matrix)`; IR components may be `InterestRateModel` instances or `LGMParams`. Constructors `from_params(...)` and `from_ir_models(...)`. Quanto drift $\rho_{f,S}\sigma_f\sigma_{fx}$ applied to the foreign rate under the domestic measure. Dataclass `TwoCurrencyFXParams`.
+- `GarmanKohlhagenFXModel` — `(params=None, *, spot_fx=1.0, fx_vol_ann=0.10, domestic_rate_ann=0.0, foreign_rate_ann=0.0, discount_curve_domestic_yrs=None, discount_factors_domestic=None, discount_curve_foreign_yrs=None, discount_factors_foreign=None)`. Curve-override-capable `domestic_discount_factor(t)` / `foreign_discount_factor(t)`, `forward_rate(T)`, closed-form `closed_form_option_price(...)`; `from_params(...)`. Dataclass `GarmanKohlhagenFXParams`.
 - `HestonFXModel` — `(params=None, *, spot_fx=1.0, v_0=0.04, kappa_ann=2.0, theta_ann=0.04, sigma_v_ann=0.20, rho=-0.5, domestic_rate_ann=0.0, foreign_rate_ann=0.0, discount_curve_*_yrs=None, discount_factors_*=None)`. Semi-analytical `closed_form_option_price(...)` (put via put-call parity), `is_feller_satisfied`, `num_factors == 2`; `from_params(...)`. Dataclass `HestonFXParams`.
 
 **Inflation models (`xvasim.models.inflation`)** — subclass `InflationModel`. `simulate_paths(...)` returns an `InflationSimulationResult` with fields `times`, `nominal_states`, `real_states`, `cpi_index`, `nominal_short_rates`, `real_short_rates`, `nominal_discount_factors`; it also supports 4-tuple unpacking: `times, x_nom, x_real, cpi = result`.
 
-- `JarrowYildirimModel` — `(nominal_ir_model, real_ir_model, base_cpi=100.0, cpi_vol_ann=0.02, correlation_matrix=None)` (default: 3×3 identity). `forward_cpi(T)`, `zero_coupon_inflation_swap_rate(T)`, `total_variance_at(T)`; constructors `from_ir_models(...)`, `from_components(...)`, `from_lgm_params(...)`. Dataclass `JarrowYildirimParams`.
-- `BlackInflationModel` — `(params=None, *, nominal_discount_curve_yrs, nominal_discount_factors, real_discount_curve_yrs, real_discount_factors, base_cpi=100.0, cpi_vol_ann=0.02)`. `interpolate_nominal_df(t)` / `interpolate_real_df(t)`, `forward_cpi(T)`, `zero_coupon_inflation_swap_rate(T)`, closed-form `price_consumer_price_index_option_analytical(...)` (`price_cpi_option_analytical` alias); `from_params(...)`. Dataclass `BlackInflationParams`.
+- `JarrowYildirimModel` — `(nominal_ir_model, real_ir_model, base_cpi=100.0, cpi_vol_ann=0.02, correlation_matrix=None)` (default: 3×3 identity). `forward_cpi(T)`, `zero_coupon_inflation_swap_rate(T)`, `total_variance_at(T)`; constructor `from_ir_models(...)`. Dataclass `JarrowYildirimParams`.
+- `BlackInflationModel` — `(params=None, *, nominal_discount_curve_yrs, nominal_discount_factors, real_discount_curve_yrs, real_discount_factors, base_cpi=100.0, cpi_vol_ann=0.02)`. `interpolate_nominal_df(t)` / `interpolate_real_df(t)`, `forward_cpi(T)`, `zero_coupon_inflation_swap_rate(T)`, closed-form `price_consumer_price_index_option_analytical(...)`; `from_params(...)`. Dataclass `BlackInflationParams`.
 
 ---
 
@@ -186,6 +187,27 @@ $$\gamma = \sqrt{\kappa^2 + 2\sigma^2}, \quad B(t) = \frac{2(e^{\gamma t} - 1)}{
 #### Path-Wise Credit Valuation Adjustment (CVA)
 $$\text{CVA} = \text{LGD} \times \frac{1}{N_{\text{paths}}} \sum_{i=1}^{N_{\text{paths}}} \sum_{j=1}^{N_{\text{dates}}} \text{Exposure}_{i,j} \times \Delta \text{PD}_{i,j} \times D_{i,j}$$
 
+#### Full XVA Suite (DVA / FVA / KVA / MVA)
+
+XvaSim's `xvasim.cva_engine` extends CVA to a complete adjustment ledger. All functions
+take simulated exposure, discount factors, and time steps directly and support the same
+chunked / `numexpr` accumulation as `compute_cva`:
+
+- **DVA** — own-bank debit valuation adjustment on the negative exposure: `compute_dva(exposure, own_marginal_pd, discount_factor, loss_given_default)`.
+- **FVA** — funding valuation adjustment, decomposed into its two symmetric
+  legs: `compute_fva(exposure, time_steps_yrs, discount_factor, funding_spread_borrow_ann, funding_spread_deposit_ann)`
+  returns `{"fca", "fba", "fva"}` where **FCA** prices the funding cost of cash
+  outflows (positive exposure / EE) at the borrowing spread and **FBA** prices
+  the funding *benefit* of cash inflows (negative exposure / ENE) at the
+  deposit spread.
+- **KVA** — capital valuation adjustment: `compute_kva(exposure, time_steps_yrs, discount_factor, capital_charge_ann, regulatory_lgd)` places the regulatory capital charge on EPE.
+- **MVA** — initial-margin valuation adjustment: `compute_mva(exposure, time_steps_yrs, discount_factor, funding_spread_borrow_ann, im_scaling, im_percentile)` prices the funding of posted initial margin $\text{IM} = \alpha \times \text{PFE}(p)$.
+- **`compute_total_xva`** — single-pass aggregator returning `{"cva", "dva", "fca", "fba", "fva", "kva", "mva", "total_xva"}` with $\text{Total} = \text{CVA} - \text{DVA} + \text{FVA} + \text{KVA} + \text{MVA}$.
+
+All five computations share a common time-discretised form:
+
+$$\text{XVA} = \frac{1}{N_{\text{paths}}} \sum_{i} \sum_{j} \text{RiskExposure}(E_{i,j}) \times \text{Spread}_j \times D_{i,j} \times \Delta t_j$$
+
 ---
 
 ### 4. Inflation Models
@@ -221,9 +243,10 @@ $$S_0(T) = \left( \frac{P_r(0, T)}{P_n(0, T)} \right)^{1/T} - 1$$
 2. **Hardware Acceleration (GPU) & Tensor Backend (`xvasim.backend`)**:
    - Unified `TensorBackend` abstract interface supporting **NumPy** (CPU default), **PyTorch** (CPU/CUDA/MPS), **CuPy** (CUDA GPU), and **JAX** (XLA CPU/GPU/TPU).
    - Dynamic backend selection and context scoping via `get_backend()`, `set_backend()`, and `use_backend()`.
-3. **Memory Efficiency & Streaming CVA Aggregation (`xvasim.cva_engine`)**:
+3. **Memory Efficiency & Chunked XVA Aggregation (`xvasim.cva_engine`)**:
    - `compute_cva(..., chunk_size=..., use_numexpr=True)` evaluates path-wise CVA in memory-friendly chunks using `numexpr` C-level multi-threaded vector evaluation.
    - `compute_cva_chunked` processes streams/generators of exposure blocks for massive portfolio risk runs exceeding system RAM.
+   - `compute_dva`, `compute_fva`, `compute_kva`, `compute_mva`, and `compute_total_xva` reuse the same chunked/numexpr accumulation for the full XVA ledger.
 4. **Fast CIR Credit Calibration**:
    - Purely numeric, Numba-compiled objective functions (`cir_calibration_objective_kernel` and `cir_survival_probability_kernel`) evaluated directly over 1D contiguous arrays without repetitive dataclass object allocation in L-BFGS-B iterations.
 5. **QMC Sequence Caching & Stateful Generation (`xvasim.qmc`)**:
@@ -560,6 +583,28 @@ cva = compute_cva(
     loss_given_default=0.60,
 )
 print(f"Calculated Portfolio CVA: ${cva:,.2f}")
+
+# 5. Full XVA ledger (DVA / FVA / KVA / MVA + total) in a single pass
+from xvasim import compute_total_xva
+
+dt = np.diff(np.concatenate(([0.0], tenors_yrs)))
+own_marginal_pd = compute_marginal_pd(credit_spreads_ann * 0.6, tenors_yrs)
+own_pd_matrix = np.tile(own_marginal_pd, (n_paths, 1))
+
+total_xva = compute_total_xva(
+    exposure=exposure,
+    time_steps_yrs=dt,
+    discount_factor=discount_factor,
+    counterparty_marginal_pd=marginal_pd_matrix,
+    own_marginal_pd=own_pd_matrix,
+    counterparty_lgd=0.60,
+    own_lgd=0.55,
+    funding_spread_borrow_ann=0.004,
+    capital_charge_ann=0.08,
+)
+print(f"Total XVA: ${total_xva['total_xva']:,.2f} "
+      f"(CVA ${total_xva['cva']:,.2f}, DVA ${total_xva['dva']:,.2f}, "
+      f"FVA ${total_xva['fva']:,.2f}, KVA ${total_xva['kva']:,.2f}, MVA ${total_xva['mva']:,.2f})")
 ```
 
 ### 5. Quasi-Monte Carlo (QMC) Variance Reduction Benchmarking
@@ -707,7 +752,7 @@ lgm_model = LGMModel(calibrated_params)
 
 # 2. Decoupled multi-factor FX model using arbitrary interest rate components
 foreign_hw = HullWhite1FModel(a_ann=0.02, sigma_ann=0.008, discount_curve_yrs=tenors_yrs, discount_factors=dfs)
-fx_model = TwoCurrencyFXModel.from_components(
+fx_model = TwoCurrencyFXModel.from_ir_models(
     domestic=lgm_model,
     foreign=foreign_hw,
     spot_fx=1.25,

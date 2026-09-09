@@ -13,7 +13,6 @@ from xvasim.models.inflation.jarrow_yildirim import JarrowYildirimModel
 from xvasim.models.ir.hull_white import HullWhite1FModel
 from xvasim.models.ir.lgm import LGMParams
 from xvasim.pricing_engine import (
-    FXLGMParams,
     OptionType,
     SwapLegType,
     _compute_h_function,
@@ -91,13 +90,6 @@ class TestPricingEngineInternals(unittest.TestCase):
             discount_curve_yrs=self.tenors,
             discount_factors=self.dfs_for,
         )
-        self.legacy_fx_params = FXLGMParams(
-            domestic=self.dom_lgm_params,
-            foreign=self.for_lgm_params,
-            spot_fx=1.15,
-            fx_vol_ann=0.12,
-            correlation_matrix=self.corr,
-        )
 
     def test_h_and_zeta_helpers(self) -> None:
         """Verify _compute_h_function, _compute_zeta, _instantaneous_forward, and _discount_path."""
@@ -123,16 +115,23 @@ class TestPricingEngineInternals(unittest.TestCase):
         self.assertEqual(df_paths.shape, (10, 3))
         np.testing.assert_allclose(df_paths[:, 0], 1.0)
 
-    def test_legacy_fx_lgm_forward_and_option_pricing(self) -> None:
-        """Verify pricing with legacy FXLGMParams for forwards and options."""
+    def test_fx_lgm_forward_and_option_pricing(self) -> None:
+        """Verify pricing with TwoCurrencyFXModel for forwards and options."""
+        fx_model = TwoCurrencyFXModel.from_ir_models(
+            domestic=self.dom_lgm_params,
+            foreign=self.for_lgm_params,
+            spot_fx=1.15,
+            fx_vol_ann=0.12,
+            correlation_matrix=self.corr,
+        )
         # Forward benchmark and MC
         bm_fwd = benchmark_price_foreign_exchange_forward(
-            self.legacy_fx_params, strike=1.15, maturity_yrs=1.0, notional=1000.0
+            fx_model, strike=1.15, maturity_yrs=1.0, notional=1000.0
         )
         self.assertIn("price", bm_fwd)
 
         mc_fwd = price_foreign_exchange_forward(
-            self.legacy_fx_params,
+            fx_model,
             strike=1.15,
             maturity_yrs=1.0,
             notional=1000.0,
@@ -143,7 +142,7 @@ class TestPricingEngineInternals(unittest.TestCase):
 
         # Option benchmark and MC Call
         bm_opt_call = benchmark_price_foreign_exchange_option(
-            self.legacy_fx_params,
+            fx_model,
             strike=1.15,
             maturity_yrs=1.0,
             notional=1000.0,
@@ -152,7 +151,7 @@ class TestPricingEngineInternals(unittest.TestCase):
         self.assertGreater(bm_opt_call["price"], 0.0)
 
         mc_opt_call = price_foreign_exchange_option(
-            self.legacy_fx_params,
+            fx_model,
             strike=1.15,
             maturity_yrs=1.0,
             notional=1000.0,
@@ -164,7 +163,7 @@ class TestPricingEngineInternals(unittest.TestCase):
 
         # Option benchmark and MC Put
         bm_opt_put = benchmark_price_foreign_exchange_option(
-            self.legacy_fx_params,
+            fx_model,
             strike=1.15,
             maturity_yrs=1.0,
             notional=1000.0,
@@ -173,7 +172,7 @@ class TestPricingEngineInternals(unittest.TestCase):
         self.assertGreater(bm_opt_put["price"], 0.0)
 
         mc_opt_put = price_foreign_exchange_option(
-            self.legacy_fx_params,
+            fx_model,
             strike=1.15,
             maturity_yrs=1.0,
             notional=1000.0,
@@ -185,7 +184,7 @@ class TestPricingEngineInternals(unittest.TestCase):
 
     def test_zero_vol_intrinsic_benchmark_options(self) -> None:
         """Verify small vol intrinsic option pricing branches."""
-        zero_vol_params = FXLGMParams(
+        zero_vol_params = TwoCurrencyFXModel.from_ir_models(
             domestic=self.dom_lgm_params,
             foreign=self.for_lgm_params,
             spot_fx=1.15,

@@ -13,12 +13,8 @@ from xvasim.pricing_engine import (
     OptionType,
     benchmark_price_foreign_exchange_forward,
     benchmark_price_foreign_exchange_option,
-    benchmark_price_fx_forward,
-    benchmark_price_fx_option,
     price_foreign_exchange_forward,
     price_foreign_exchange_option,
-    price_fx_forward,
-    price_fx_option,
 )
 from xvasim.qmc import RandomSequenceType
 
@@ -94,8 +90,8 @@ class TestFXPricing(unittest.TestCase):
             num_std=3.5,
         )
 
-        # Alias price_fx_forward
-        res_alias = price_fx_forward(
+        # MC pricing with TwoCurrencyFXModel
+        res_two = price_foreign_exchange_forward(
             params=self.two_curr_model,
             strike=1.15,
             maturity_yrs=1.0,
@@ -103,10 +99,10 @@ class TestFXPricing(unittest.TestCase):
             n_paths=200,
             seed=42,
         )
-        self.assertIn("price", res_alias)
+        self.assertIn("price", res_two)
 
     def test_benchmark_fx_forward(self) -> None:
-        """Verify benchmark_price_fx_forward calculation."""
+        """Verify benchmark_price_foreign_exchange_forward calculation."""
         bm = benchmark_price_foreign_exchange_forward(
             params=self.gk_model,
             strike=1.15,
@@ -114,13 +110,13 @@ class TestFXPricing(unittest.TestCase):
             notional=1000.0,
         )
         self.assertIn("price", bm)
-        bm_alias = benchmark_price_fx_forward(
-            params=self.gk_model,
+        bm_two = benchmark_price_foreign_exchange_forward(
+            params=self.two_curr_model,
             strike=1.15,
             maturity_yrs=1.0,
             notional=1000.0,
         )
-        self.assertEqual(bm["price"], bm_alias["price"])
+        self.assertIn("price", bm_two)
 
     def test_fx_option_pricing_gk_call_and_put(self) -> None:
         """Verify MC FX option pricing for call and put under Garman-Kohlhagen."""
@@ -141,7 +137,7 @@ class TestFXPricing(unittest.TestCase):
             num_std=3.5,
         )
 
-        res_put = price_fx_option(
+        res_put = price_foreign_exchange_option(
             params=self.gk_model,
             strike=1.14,
             maturity_yrs=1.0,
@@ -159,7 +155,7 @@ class TestFXPricing(unittest.TestCase):
         )
 
     def test_benchmark_fx_option(self) -> None:
-        """Verify benchmark_price_fx_option analytical formula."""
+        """Verify benchmark_price_foreign_exchange_option analytical formula."""
         bm_call = benchmark_price_foreign_exchange_option(
             params=self.gk_model,
             strike=1.16,
@@ -169,14 +165,14 @@ class TestFXPricing(unittest.TestCase):
         )
         self.assertGreater(bm_call["price"], 0.0)
 
-        bm_alias = benchmark_price_fx_option(
+        bm_put = benchmark_price_foreign_exchange_option(
             params=self.gk_model,
             strike=1.16,
             maturity_yrs=1.0,
             notional=1000.0,
-            option_type="call",
+            option_type="put",
         )
-        self.assertEqual(bm_call["price"], bm_alias["price"])
+        self.assertGreater(bm_put["price"], 0.0)
 
 
 if __name__ == "__main__":

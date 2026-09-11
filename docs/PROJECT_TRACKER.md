@@ -9,11 +9,11 @@ Living status used by human and AI contributors to keep the project's progress v
 | Branch | `main` (in sync with `origin/main`) |
 | Package version | 0.1.0 |
 | Python | 3.14 (repo requires `>=3.14`) |
-| Tests | 223 passing (pytest), dual-runner compatible (unittest) |
-| Coverage | 98.0% (floor: 95.0%) |
+| Tests | 254 passing (pytest), dual-runner compatible (unittest) |
+| Coverage | 97.4% (floor: 95.0%) |
 | Ruff lint | clean |
 | Pyrefly type check | clean (0 errors) |
-| Last audit | 2026-09-09 |
+| Last audit | 2026-09-11 |
 
 ## Status Legend
 
@@ -36,6 +36,7 @@ Living status used by human and AI contributors to keep the project's progress v
 - **Agentic workflow & docs (this change)** — added `AGENTS.md` as the single source of truth, `docs/PROJECT_TRACKER.md`, `docs/FIXES_AND_COVERAGE.md`; removed `GEMINI.md` (reconciled into `AGENTS.md`); new no-legacy-compat policy.
 - **Test suite repair** — replaced legacy alias/param imports in 8 test modules to match canonical APIs; 194 tests green before XVA expansion.
 - **XVA suite expansion** — `compute_dva`, `compute_fva`, `compute_kva`, `compute_mva`, `compute_total_xva` plus ENE/FE exposure profile keys; FVA decomposed into symmetric FCA/FBA legs.
+- **Portfolio & Exposure layer** — `Trade` protocol, `FXForwardTrade`, `FXEuropeanOptionTrade`, `MarketSimulation`, `Portfolio` (netting set), `compute_portfolio_exposure`, `compute_portfolio_xva`; `TwoCurrencyFXModel` gains `domestic_discount_factor`/`foreign_discount_factor`; `FXModel` abstract contract updated.
 
 ---
 
@@ -74,10 +75,18 @@ Living status used by human and AI contributors to keep the project's progress v
 - [x] FVA decomposed into symmetric legs: `compute_fva` returns `{fca, fba, fva}` (funding cost on EE + funding benefit on ENE); `compute_total_xva` reports both legs.
 - [x] Single-pass full XVA aggregation (`compute_total_xva`) returning component + total values.
 
+### Portfolio & Exposure
+- [x] `Trade` protocol (structural), `FXForwardTrade`, `FXEuropeanOptionTrade` (frozen dataclasses).
+- [x] `MarketSimulation` (shape-validating frozen dataclass) + `simulate_market`.
+- [x] `Portfolio` (netting set with dedup validation) + `compute_portfolio_exposure`.
+- [x] `PortfolioExposureResult` dataclass with per-trade MTM, net/gross exposure, negative exposure.
+- [x] End-to-end `compute_portfolio_xva`: simulate → aggregate → CIR credit calibration → full XVA ledger + exposure profile.
+- [x] `TwoCurrencyFXModel` implements `domestic_discount_factor`/`foreign_discount_factor` abstract methods.
+
 ### Quality, Tests & Hygiene
-- [x] 223 tests across unit / integration / benchmarks; dual pytest + unittest.
+- [x] 254 tests across unit / integration / benchmarks; dual pytest + unittest.
 - [x] Analytical-vs-MC and path-convergence benchmarks.
-- [x] 98.0% coverage (above 95.0% floor).
+- [x] 97.4% coverage (above 95.0% floor).
 - [x] Git hygiene: `*.pyc`, `.coverage`, caches untracked and ignored.
 
 ### Legacy Compatibility Cleanup (new policy)
@@ -95,8 +104,8 @@ Living status used by human and AI contributors to keep the project's progress v
 
 ## Current Focus (In Progress)
 
-- XVA suite expansion landed (DVA/FVA/KVA/MVA/total aggregator, FVA decomposed into symmetric FCA/FBA legs); quality gates green at 223 tests / 98.0% coverage.
-- Legacy compatibility cleanup completed: no shorthand or deprecated aliases remain in `src/` or `tests/`; docs normalized.
+- Portfolio & Exposure layer landed (Trade protocol, FXForwardTrade, FXEuropeanOptionTrade, MarketSimulation, Portfolio, compute_portfolio_exposure, compute_portfolio_xva); quality gates green at 254 tests / 97.4% coverage.
+- FXModel gained `domestic_discount_factor`/`foreign_discount_factor` abstract contract; `TwoCurrencyFXModel` implements both.
 - Next up: backlog ideas — collateral/COLVA XVA, Greeks surface, YoY inflation benchmark, two-factor Gaussian IR model.
 
 ## How to Update

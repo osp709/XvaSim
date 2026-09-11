@@ -470,8 +470,8 @@ class TestPricingEngineInternals(unittest.TestCase):
         )
         self.assertGreater(res_jy_put["price"], 0.0)
 
-    def test_custom_fx_model_without_discount_factor(self) -> None:
-        """Verify fallback when FXModel lacks domestic_discount_factor."""
+    def test_custom_fx_model_discount_factor_interface(self) -> None:
+        """Verify a custom FXModel implementing the discount-factor interface."""
 
         class DummyFXModel(FXModel):
             @property
@@ -485,6 +485,14 @@ class TestPricingEngineInternals(unittest.TestCase):
             @property
             def spot_fx(self) -> float:
                 return 1.15
+
+            def domestic_discount_factor(self, t: float | np.ndarray) -> np.ndarray:
+                t_arr = np.asarray(t, dtype=np.float64)
+                return np.exp(-0.03 * t_arr)
+
+            def foreign_discount_factor(self, t: float | np.ndarray) -> np.ndarray:
+                t_arr = np.asarray(t, dtype=np.float64)
+                return np.exp(-0.01 * t_arr)
 
             def simulate_paths(
                 self, maturity_yrs: float, n_paths: int, n_steps: int, *args: typing.Any, **kwargs: typing.Any

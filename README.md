@@ -35,6 +35,7 @@ The following table summarizes all financial instruments and valuation adjustmen
 | **CPI Index Option (Caplet / Floorlet)** | Inflation | `price_consumer_price_index_option` | `benchmark_price_consumer_price_index_option` | Nominal IR $r_n(t)$, Real IR $r_r(t)$, CPI Index $I(t)$ | European option on inflation index: Caplet $N \times \max\left(\frac{I(T)}{I(0)} - (1+K)^T, 0\right)$ and Floorlet $N \times \max\left((1+K)^T - \frac{I(T)}{I(0)}, 0\right)$. |
 | **Portfolio Credit Valuation Adjustment (CVA)** | Credit / Multi-Asset | `compute_cva` | Marginal PD via CIR zero-curve | Credit Hazard Rate $\lambda(t)$, Underlying Portfolio Exposure | Path-wise Monte Carlo integration of counterparty default risk across simulated market exposure paths, discount factors, and marginal default probabilities. |
 | **XVA Suite (DVA/FVA/KVA/MVA)** | Credit / Multi-Asset | `compute_dva`, `compute_fva`, `compute_kva`, `compute_mva`, `compute_total_xva` | Marginal PD via CIR zero-curve | Credit Hazard Rate, Exposure, Discount Factors | Debt, funding, capital, and initial-margin valuation adjustments with a single-pass `compute_total_xva` aggregator covering both sides of the trade and the CCAR capital charge. |
+| **Portfolio (FX netting set)** | Credit / Multi-Asset | `compute_portfolio_exposure`, `simulate_portfolio_exposure`, `compute_portfolio_xva` | Marginal PD via CIR zero-curve | Spot FX $S(t)$, Domestic/foreign IR, Credit Hazard Rate | `Trade` protocol (`FXForwardTrade`, `FXEuropeanOptionTrade`), `MarketSimulation`, netting-set `Portfolio`, conditional-valuation exposure, and the end-to-end portfolio XVA ledger with EE/EPE/PFE profile. |
 
 ---
 
@@ -310,7 +311,17 @@ graph TD
     subgraph Pricing Engines ["Pricing & Valuation Engines (xvasim)"]
         MCPricers["Primary Monte Carlo Pricers <br> price_interest_rate_swap, price_cross_currency_swap <br> price_foreign_exchange_forward, price_foreign_exchange_option <br> price_zero_coupon_inflation_swap, price_year_on_year_inflation_swap, price_consumer_price_index_option"]
         Benchmarks["Analytical Benchmarks <br> benchmark_price_interest_rate_swap, benchmark_price_cross_currency_swap <br> benchmark_price_foreign_exchange_forward, benchmark_price_foreign_exchange_option <br> benchmark_price_zero_coupon_inflation_swap, benchmark_price_consumer_price_index_option"]
-        CVAEngine["CVA Engine (Chunked & Numexpr) <br> compute_cva, compute_cva_chunked, compute_marginal_pd"]
+        CVAEngine["CVA Engine (Chunked & Numexpr) <br> compute_cva, compute_cva_chunked, compute_marginal_pd <br> compute_total_xva (CVA/DVA/FVA/KVA/MVA)"]
+    end
+
+    subgraph Portfolio Layer ["Portfolio & Exposure Layer (xvasim.portfolio)"]
+        Trades["Trade protocol <br> FXForwardTrade, FXEuropeanOptionTrade"]
+        Sim["MarketSimulation <br> simulate_market"]
+        PortfolioSet["Portfolio (netting set) <br> compute_portfolio_exposure"]
+        XVALedger["compute_portfolio_xva <br> full XVA ledger + exposure profile"]
+        Trades --> PortfolioSet
+        Sim --> PortfolioSet
+        PortfolioSet --> XVALedger
     end
 
     HardwareBackend --> Modular Models
@@ -322,6 +333,9 @@ graph TD
     Modular Models --> MCPricers
     Modular Models --> Benchmarks
     Modular Models --> CVAEngine
+    Modular Models --> Sim
+    PortfolioSet --> CVAEngine
+    XVALedger --> CVAEngine
 ```
 
 ---
@@ -342,6 +356,7 @@ XvaSim/
 │       ├── backend.py          # TensorBackend hardware abstraction (NumPy, PyTorch, CuPy, JAX)
 │       ├── cva_engine.py       # CVA calculation, chunked evaluation & credit calibration
 │       ├── jit.py              # Numba JIT simulation kernels & numerical routines
+│       ├── portfolio.py        # Trades, MarketSimulation, Portfolio netting sets & portfolio XVA
 │       ├── pricing_engine.py   # MC & analytical pricing for IR, FX & inflation derivatives
 │       ├── qmc.py              # QMC sequences, sequence caching & variance reduction
 │       ├── utils.py            # Date conversion (dates_to_years)
@@ -361,6 +376,7 @@ XvaSim/
     ├── unit/                   # Isolated unit tests
     │   ├── cva/                # CVA calculation & CIR calibration tests
     │   ├── models/             # Model-specific tests (IR, FX, Credit, Inflation, base, registry)
+    │   ├── portfolio/          # Portfolio / netting-set exposure & XVA ledger tests
     │   ├── pricing/            # Pricing engine tests (IRS, XCCY, FX, Inflation, internals)
     │   ├── qmc/                # Quasi-Monte Carlo variate & convergence tests
     │   ├── test_backend.py     # Hardware acceleration & tensor backend tests
@@ -759,6 +775,65 @@ fx_model = TwoCurrencyFXModel.from_ir_models(
     fx_vol_ann=0.11,
     correlation_matrix=np.eye(3),
 )
+```
+
+### 10. Portfolio & Netting-Set XVA (FX)
+
+```python
+import numpy as np
+from xvasim import (
+    FXEuropeanOptionTrade,
+    FXForwardTrade,
+    GarmanKohlhagenFXModel,
+    Portfolio,
+    compute_portfolio_exposure,
+    compute_portfolio_xva,
+    simulate_market,
+)
+
+# 1. FX market model (Garman-Kohlhagen, deterministic curves)
+fx_model = GarmanKohlhagenFXModel(
+    spot_fx=1.20, fx_vol_ann=0.15,
+    domestic_rate_ann=0.03, foreign_rate_ann=0.02,
+)
+
+# 2. Netting set of FX trades (forex notionals make all values in domestic ccy)
+portfolio = Portfolio(
+    portfolio_id="fx_book",
+    trades=[
+        FXForwardTrade("fwd_long", 1_000_000.0, strike_fx=1.22, maturity_yrs=3.0),
+        FXForwardTrade("fwd_short", -300_000.0, strike_fx=1.19, maturity_yrs=2.0),
+        FXEuropeanOptionTrade("call", 500_000.0, strike_fx=1.18, maturity_yrs=2.0,
+                              option_type="call"),
+        FXEuropeanOptionTrade("put", 500_000.0, strike_fx=1.24, maturity_yrs=4.0,
+                              option_type="put"),
+    ],
+)
+
+# 3. Shared market simulation -> netting-set exposure (positive exposure profile)
+sim = simulate_market(fx_model, maturity_yrs=5.0, n_steps=10, n_paths=10_000,
+                      random_type="sobol", seed=42)
+exposure_res = compute_portfolio_exposure(portfolio, sim)
+print(exposure_res.exposure.shape)      # (n_paths, n_dates)
+
+# 4. Full XVA ledger in one pass: CVA/DVA/FVA (FCA/FBA)/KVA/MVA + exposure profile
+credit_tenors_yrs = np.array([0.5, 1.0, 2.0, 3.0, 5.0])
+cp_spreads = np.array([0.010, 0.012, 0.016, 0.020, 0.025])
+own_spreads = cp_spreads * 0.6
+ledger = compute_portfolio_xva(
+    portfolio=portfolio,
+    fx_model=fx_model,
+    maturity_yrs=5.0,
+    n_steps=10,
+    counterparty_credit_spreads_ann=cp_spreads,
+    own_credit_spreads_ann=own_spreads,
+    credit_tenors_yrs=credit_tenors_yrs,
+    n_paths=10_000,
+    random_type="sobol",
+    seed=42,
+)
+print({k: round(v, 2) for k, v in ledger.items()
+       if k in ("cva", "dva", "fva", "kva", "mva", "total_xva")})
 ```
 
 ---

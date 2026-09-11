@@ -118,6 +118,18 @@ class TwoCurrencyFXModel(FXModel):
         """Current spot FX rate."""
         return self._spot_fx
 
+    def domestic_discount_factor(self, t: float | np.ndarray) -> np.ndarray:
+        """Domestic discount factor from the domestic term structure, P_d(0, t)."""
+        return np.asarray(
+            self._domestic.interpolate_discount_factor(t), dtype=np.float64
+        )
+
+    def foreign_discount_factor(self, t: float | np.ndarray) -> np.ndarray:
+        """Foreign discount factor from the foreign term structure, P_f(0, t)."""
+        return np.asarray(
+            self._foreign.interpolate_discount_factor(t), dtype=np.float64
+        )
+
     @property
     def fx_vol_ann(self) -> float:
         """FX volatility."""

@@ -73,6 +73,14 @@ class DummyFXModel(FXModel):
     def spot_fx(self) -> float:
         return 1.25
 
+    def domestic_discount_factor(self, t: float | np.ndarray) -> np.ndarray:
+        t_arr = np.asarray(t, dtype=np.float64)
+        return np.exp(-0.02 * t_arr)
+
+    def foreign_discount_factor(self, t: float | np.ndarray) -> np.ndarray:
+        t_arr = np.asarray(t, dtype=np.float64)
+        return np.exp(-0.01 * t_arr)
+
     def simulate_paths(
         self, maturity_yrs: float, n_paths: int, n_steps: int, *args: typing.Any, **kwargs: typing.Any
     ) -> typing.Any:

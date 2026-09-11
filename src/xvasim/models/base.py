@@ -299,6 +299,30 @@ class FXModel(StochasticModel):
         ...
 
     @abc.abstractmethod
+    def domestic_discount_factor(self, t: float | np.ndarray) -> np.ndarray:
+        """Evaluate the domestic discount factor P_d(0, t).
+
+        Args:
+            t: Tenor(s) in years.
+
+        Returns:
+            Discount factor(s).
+        """
+        ...
+
+    @abc.abstractmethod
+    def foreign_discount_factor(self, t: float | np.ndarray) -> np.ndarray:
+        """Evaluate the foreign discount factor P_f(0, t).
+
+        Args:
+            t: Tenor(s) in years.
+
+        Returns:
+            Discount factor(s).
+        """
+        ...
+
+    @abc.abstractmethod
     def simulate_paths(
         self,
         maturity_yrs: float,

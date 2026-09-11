@@ -11,8 +11,9 @@ Core capabilities:
 1. **Modular Stochastic Models Framework** (`xvasim.models`): pluggable stochastic models with a central dynamic registry and factory (`ModelRegistry`, `create_ir_model`, `create_credit_model`, `create_fx_model`, `create_inflation_model`).
 2. **Credit Valuation Adjustment (CVA) & Exposure Analytics** (`xvasim.cva_engine`): CIR/modular credit spread calibration (L-BFGS-B), path-wise Monte Carlo CVA aggregation, and counterparty exposure profiling (EE, EPE, Max PFE, quantile curves).
 3. **Derivative Pricing Engine** (`xvasim.pricing_engine`): primary Monte Carlo pricers (`price_*`) that simulate paths by default and return simulated price, standard error, and analytical benchmark; dedicated closed-form benchmarks (`benchmark_price_*`).
-4. **Quasi-Monte Carlo (QMC) & Variance Reduction** (`xvasim.qmc`): Sobol/Halton/LHS/PRNG (`RandomSequenceType`), variate generation, `compare_t0_npv_fitting` convergence diagnostics, thread-safe `QMCSequenceCache`, stateful `QMCSequenceGenerator`.
-5. **High-Performance JIT & Hardware Acceleration** (`xvasim.jit`, `xvasim.backend`): Numba `@njit(fastmath=True, nogil=True)` kernels and a unified `TensorBackend` abstraction (NumPy, PyTorch, CuPy, JAX) with `use_backend`/`set_backend`/`get_backend`.
+4. **Portfolio & Exposure Layer** (`xvasim.portfolio`): `Trade` protocol + concrete FX trades (`FXForwardTrade`, `FXEuropeanOptionTrade`), `MarketSimulation` (shared simulated market context), `Portfolio` netting sets, `compute_portfolio_exposure`/`simulate_portfolio_exposure`, and the end-to-end `compute_portfolio_xva` ledger (CVA/DVA/FVA/KVA/MVA + exposure profile).
+5. **Quasi-Monte Carlo (QMC) & Variance Reduction** (`xvasim.qmc`): Sobol/Halton/LHS/PRNG (`RandomSequenceType`), variate generation, `compare_t0_npv_fitting` convergence diagnostics, thread-safe `QMCSequenceCache`, stateful `QMCSequenceGenerator`.
+6. **High-Performance JIT & Hardware Acceleration** (`xvasim.jit`, `xvasim.backend`): Numba `@njit(fastmath=True, nogil=True)` kernels and a unified `TensorBackend` abstraction (NumPy, PyTorch, CuPy, JAX) with `use_backend`/`set_backend`/`get_backend`.
 
 ## Core Repo Rules
 
@@ -38,6 +39,7 @@ XvaSim/
 │       ├── backend.py          # TensorBackend hardware abstraction (NumPy, PyTorch, CuPy, JAX)
 │       ├── cva_engine.py       # CVA calculation, chunked evaluation & credit calibration
 │       ├── jit.py              # Numba JIT simulation kernels & numerical routines
+│       ├── portfolio.py        # Trades, MarketSimulation, Portfolio netting sets & portfolio XVA
 │       ├── pricing_engine.py   # MC & analytical pricing for IR, FX & inflation derivatives
 │       ├── qmc.py              # QMC sequences, sequence caching & variance reduction
 │       ├── utils.py            # Date conversion (dates_to_years)
@@ -57,6 +59,7 @@ XvaSim/
     ├── unit/                   # Isolated unit tests
     │   ├── cva/                # CVA calculation & CIR calibration tests
     │   ├── models/             # Model-specific tests (IR, FX, Credit, Inflation, base, registry)
+    │   ├── portfolio/          # Portfolio / netting-set exposure & XVA ledger tests
     │   ├── pricing/            # Pricing engine tests (IRS, XCCY, FX, Inflation, internals, PricingResult)
     │   ├── qmc/                # Quasi-Monte Carlo variate & convergence tests
     │   ├── test_backend.py     # Hardware acceleration & tensor backend tests

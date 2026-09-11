@@ -36,6 +36,7 @@ The following table summarizes all financial instruments and valuation adjustmen
 | **Portfolio Credit Valuation Adjustment (CVA)** | Credit / Multi-Asset | `compute_cva` | Marginal PD via CIR zero-curve | Credit Hazard Rate $\lambda(t)$, Underlying Portfolio Exposure | Path-wise Monte Carlo integration of counterparty default risk across simulated market exposure paths, discount factors, and marginal default probabilities. |
 | **XVA Suite (DVA/FVA/KVA/MVA)** | Credit / Multi-Asset | `compute_dva`, `compute_fva`, `compute_kva`, `compute_mva`, `compute_total_xva` | Marginal PD via CIR zero-curve | Credit Hazard Rate, Exposure, Discount Factors | Debt, funding, capital, and initial-margin valuation adjustments with a single-pass `compute_total_xva` aggregator covering both sides of the trade and the CCAR capital charge. |
 | **Portfolio (FX netting set)** | Credit / Multi-Asset | `compute_portfolio_exposure`, `simulate_portfolio_exposure`, `compute_portfolio_xva` | Marginal PD via CIR zero-curve | Spot FX $S(t)$, Domestic/foreign IR, Credit Hazard Rate | `Trade` protocol (`FXForwardTrade`, `FXEuropeanOptionTrade`), `MarketSimulation`, netting-set `Portfolio`, conditional-valuation exposure, and the end-to-end portfolio XVA ledger with EE/EPE/PFE profile. |
+| **Greeks & Sensitivities** | FX | `compute_greeks` | AD-vs-analytical Black-76 / finite-difference benchmarks | Spot FX $S(t)$, FX vol, Domestic/foreign IR | Dependency-free forward-mode automatic differentiation (`Dual`/`Dual2`) returning delta, gamma, vega, and rho_domestic/rho_foreign for FX forwards and European options via `autodiff`/`closed_form` (analytical AD) and `monte_carlo` (pathwise AD over QMC draws, with standard error). |
 
 ---
 
@@ -252,8 +253,12 @@ $$S_0(T) = \left( \frac{P_r(0, T)}{P_n(0, T)} \right)^{1/T} - 1$$
    - Purely numeric, Numba-compiled objective functions (`cir_calibration_objective_kernel` and `cir_survival_probability_kernel`) evaluated directly over 1D contiguous arrays without repetitive dataclass object allocation in L-BFGS-B iterations.
 5. **QMC Sequence Caching & Stateful Generation (`xvasim.qmc`)**:
    - Thread-safe `QMCSequenceCache` with LRU eviction and hit/miss tracking.
-   - `QMCSequenceGenerator` maintaining sequential generator state across simulation blocks for fast bump-and-reval Greeks and sensitivities.
+   - `QMCSequenceGenerator` maintaining sequential generator state across simulation blocks for fast bump-and-reval sensitivities.
    - `cached_normal_draws` and `use_cache=True` parameter on `generate_normal_draws` and `generate_brownian_increments`.
+6. **Automatic-Differentiation Greeks (`xvasim.greeks`)**:
+   - Dependency-free NumPy forward-mode AD engine: `Dual` (first-order) and `Dual2` (second-order) with arithmetic and `exp`/`log`/`sqrt`/`erf`/`norm_cdf`/`relu` chain rules.
+   - `compute_greeks(trade, fx_model, ...)` returns a `GreeksResult` with delta, gamma, vega, and rho_domestic/rho_foreign for FX forwards/options.
+   - `autodiff`/`closed_form` evaluate closed-form models analytically; `monte_carlo` applies pathwise AD on frozen QMC draws and reports `std_error`; both match Black-76 analytics exactly and converge to finite differences.
 
 ---
 
@@ -355,6 +360,7 @@ XvaSim/
 │       ├── __init__.py         # Package root exports
 │       ├── backend.py          # TensorBackend hardware abstraction (NumPy, PyTorch, CuPy, JAX)
 │       ├── cva_engine.py       # CVA calculation, chunked evaluation & credit calibration
+│       ├── greeks.py           # Forward-mode autodiff Greeks engine (Dual/Dual2, compute_greeks)
 │       ├── jit.py              # Numba JIT simulation kernels & numerical routines
 │       ├── portfolio.py        # Trades, MarketSimulation, Portfolio netting sets & portfolio XVA
 │       ├── pricing_engine.py   # MC & analytical pricing for IR, FX & inflation derivatives
@@ -375,6 +381,7 @@ XvaSim/
     │   └── test_curves.py      # Flat, upward, and downward mock discount curves
     ├── unit/                   # Isolated unit tests
     │   ├── cva/                # CVA calculation & CIR calibration tests
+    │   ├── greeks/             # Autodiff Greeks engine tests (AD rules, per-model dispatch, error paths)
     │   ├── models/             # Model-specific tests (IR, FX, Credit, Inflation, base, registry)
     │   ├── portfolio/          # Portfolio / netting-set exposure & XVA ledger tests
     │   ├── pricing/            # Pricing engine tests (IRS, XCCY, FX, Inflation, internals)
@@ -383,7 +390,7 @@ XvaSim/
     │   ├── test_jit.py         # Compiled numerical kernels tests
     │   └── utils/              # Helper utilities tests
     ├── integration/            # Multi-model simulations & portfolio CVA pipeline tests
-    └── benchmarks/             # Analytical benchmark vs Monte Carlo convergence tests
+    └── benchmarks/             # Analytical benchmark vs Monte Carlo convergence tests (incl. AD Greeks)
 ```
 
 ---
@@ -835,6 +842,133 @@ ledger = compute_portfolio_xva(
 print({k: round(v, 2) for k, v in ledger.items()
        if k in ("cva", "dva", "fva", "kva", "mva", "total_xva")})
 ```
+
+### 11. Automatic-Differentiation Greeks (`compute_greeks`)
+
+`XvaSim` ships a **first-class Greeks engine** (`xvasim.greeks`) that computes delta, gamma, vega, and interest-rate rho for FX forwards and European FX options *without* finite-difference noise, rounding explosion, or re-simulating the market. The engine is built on a **dependency-free NumPy forward-mode automatic-differentiation (AD) layer** — no JAX, PyTorch, or TensorFlow is required at import time.
+
+```
+compute_greeks(trade, fx_model, *, method="autodiff",
+               n_paths=10_000, random_type=RandomSequenceType.SOBOL,
+               seed=42, scramble=True, rng=None) -> GreeksResult
+```
+
+`GreeksResult` is a `dict[str, Any]` subclass supporting classic dict indexing (`res["delta"]`) **and** attribute access (`res.delta`). A sensitivity a model cannot express is reported as `None` (e.g. `rho` is `None` on a Two-Currency model), and Monte Carlo mode adds a `std_error` key for the pathwise price estimator.
+
+#### How it works — forward-mode AD with `Dual` / `Dual2`
+
+The engine seeds every price input with an infinitesimal direction and threads the derivative through the exact same closed-form arithmetic the price uses:
+
+- `Dual(v, g)` — first-order dual number carrying the gradient `g` alongside the primal value `v`.
+- `Dual2(v, g, h)` — second-order dual number additionally carrying the Hessian diagonal `h` (needed for gamma).
+
+Chain rules are implemented by hand for every operation used in pricing — `+`, `-`, `*`, `/`, `**`, `exp`, `log`, `sqrt`, `erf`, `norm_cdf`, `relu`, and `mean` — so `compute_greeks` on the analytical price is **exact to machine precision**, unlike bump-and-reval or finite differences. For a full recap of forward-mode AD see the [Automatic Differentiation](https://en.wikipedia.org/wiki/Automatic_differentiation) and [Dual numbers](https://en.wikipedia.org/wiki/Dual_number) references.
+
+#### Seed mapping (which Greek needs which seed)
+
+The Greeks engine picks a clear **sensitivity seed** for each Greek. Only primes for which the value is actually present are differentiated:
+
+| Seed (parameter) | First order | Second order | Notes |
+| :--- | :--- | :--- | :--- |
+| `spot_fx` | delta | gamma | Gamma for options is the convexity of the premium; for linear swaps/forwards it is identically 0. |
+| `fx_vol_ann` | vega | — | Vega is the premium's sensitivity to implied volatility; `None` on `HestonFXModel`. |
+| `domestic_rate_ann` | rho_domestic | — | Rho w.r.t. the domestic discounting curve. |
+| `foreign_rate_ann` | rho_foreign | — | Rho w.r.t. the foreign discounting curve. |
+
+For the Garman-Kohlhagen (Black-76) call these reduce to the textbook formulas (`F = S·P_f/P_d`, `Φ` the standard normal CDF, `φ` its density):
+
+\[
+C = N·P_d\,[\,F·\Phi(d_1) - K·\Phi(d_2)\,],\quad
+d_{1,2} = \frac{\ln(F/K) \pm \tfrac12 \sigma^2 T}{\sigma\sqrt{T}},
+\]
+
+\[
+\Delta = N·P_f·\Phi(d_1),\quad
+\Gamma = N·\frac{P_f^2}{P_d}·\frac{\varphi(d_1)}{F\,\sigma\sqrt{T}},\quad
+\mathcal{V} = N·P_d·F·\varphi(d_1)\sqrt{T},
+\]
+
+\[
+\rho_d = N·T·P_d·K·\Phi(d_2),\quad
+\rho_f = -N·T·P_d·F·\Phi(d_1).
+\]
+
+The analytical Greeks are the **exact AD output** — they are not approximations — so the engine reproduces Black-76's closed forms to ~12 significant digits (see `tests/benchmarks/test_greeks_autodiff.py`).
+
+#### Methods
+
+| `method` | Description |
+| :--- | :--- |
+| `"autodiff"` (default) | Forward-mode AD through the **analytical/closed-form** price. Exact, instantaneous, and deterministic. |
+| `"closed_form"` | Alias of `"autodiff"`; the result is tagged `method="autodiff"`. |
+| `"monte_carlo"` | **Pathwise** AD on the analytical terminal-payoff formula, evaluated on frozen QMC variates from `qmc.generate_normal_draws`. Forwards run through `Dual2` (so gamma is exactly 0 on the linear payoff); options run first-order only, because the pathwise second derivative of the payoff is degenerate — option `gamma` is reported as `None` in this mode. Exposes `random_type`, `seed`, `scramble`, and `rng` and reports `std_error`.
+
+> Monte Carlo mode is supported for `GarmanKohlhagenFXModel` only (`NotImplementedError` otherwise), and its rate seeds are never dropped even in curve-discounting mode.
+
+#### Greek availability across models
+
+| Model | delta | gamma | vega | rho_domestic / rho_foreign |
+| :--- | :--- | :--- | :--- | :--- |
+| `GarmanKohlhagenFXModel` (flat rates) | ✅ | ✅ | ✅ | ✅ |
+| `GarmanKohlhagenFXModel` (with discount curves) | ✅ | ✅ | ✅ | `None` (curve-driven, no scalar-rate seed) |
+| `TwoCurrencyFXModel` | ✅ | ✅ | ✅ | `None` (curve-driven IR components) |
+| `HestonFXModel` | ✅ | ✅ | `None` (stochastic-vol variance seed not exposed) | ✅ (flat rates) / `None` (curves) |
+
+#### Error contract
+
+- Unknown `method` → `ValueError`.
+- Unsupported trade type → `TypeError`.
+- FX model without `spot_fx` → `ValueError`.
+- `HestonFXModel` European-option **closed form** is not supported → `NotImplementedError`.
+- Monte Carlo mode with a non-`GarmanKohlhagenFXModel` model → `NotImplementedError`.
+
+#### Quick example
+
+```python
+from xvasim import (
+    FXEuropeanOptionTrade,
+    FXForwardTrade,
+    GarmanKohlhagenFXModel,
+    OptionType,
+    compute_greeks,
+)
+
+model = GarmanKohlhagenFXModel(
+    spot_fx=1.20,
+    fx_vol_ann=0.15,
+    domestic_rate_ann=0.03,
+    foreign_rate_ann=0.01,
+)
+option = FXEuropeanOptionTrade(
+    trade_id="opt-1",
+    notional=1_000_000.0,
+    strike_fx=1.20,
+    maturity_yrs=1.0,
+    option_type=OptionType.CALL,
+)
+
+greeks = compute_greeks(option, model)                # analytical AD
+print(greeks.price, greeks.delta, greeks.gamma)        # 82710.7 582048.8 2147186.8
+print(greeks.vega, greeks.rho_domestic, greeks.rho_foreign)
+
+mc_greeks = compute_greeks(                               # pathwise MC on QMC draws
+    option,
+    model,
+    method="monte_carlo",
+    n_paths=16_384,
+    random_type="sobol",
+    seed=42,
+)
+print(mc_greeks.method, mc_greeks.std_error)
+print(mc_greeks.available_parameters)   # seeds a model can express (spot/vol/rates)
+
+fwd = FXForwardTrade(trade_id="fwd-1", notional=1_000_000.0,
+                     strike_fx=1.21, maturity_yrs=1.0)
+fwd_greeks = compute_greeks(fwd, model)
+print(fwd_greeks.delta, fwd_greeks.gamma)  # 990049.8 (N*P_f), 0.0 (linear payoff)
+```
+
+The closed-form method is verified against analytical Black-76 Greeks (exact) and against shrinking-step central finite differences in `tests/benchmarks/test_greeks_autodiff.py`, and the pathwise Monte Carlo method is verified against the closed-form result within QMC error in `tests/unit/greeks/test_greeks.py`. For background on the theory, see [Greeks (finance)](https://en.wikipedia.org/wiki/Greeks_(finance)) for the sensitivity definitions, [Black model](https://en.wikipedia.org/wiki/Black_model) / [Garman–Kohlhagen model](https://en.wikipedia.org/wiki/Garman%E2%80%93Kohlhagen_model) for the option formulas, [Finite difference](https://en.wikipedia.org/wiki/Finite_difference) for the FD alternatives the engine avoids, and [Quasi-Monte Carlo method](https://en.wikipedia.org/wiki/Quasi-Monte_Carlo_method) / [Sobol sequence](https://en.wikipedia.org/wiki/Sobol_sequence) for how the pathwise draws are generated.
 
 ---
 

@@ -14,6 +14,7 @@ Core capabilities:
 4. **Portfolio & Exposure Layer** (`xvasim.portfolio`): `Trade` protocol + concrete FX trades (`FXForwardTrade`, `FXEuropeanOptionTrade`), `MarketSimulation` (shared simulated market context), `Portfolio` netting sets, `compute_portfolio_exposure`/`simulate_portfolio_exposure`, and the end-to-end `compute_portfolio_xva` ledger (CVA/DVA/FVA/KVA/MVA + exposure profile).
 5. **Quasi-Monte Carlo (QMC) & Variance Reduction** (`xvasim.qmc`): Sobol/Halton/LHS/PRNG (`RandomSequenceType`), variate generation, `compare_t0_npv_fitting` convergence diagnostics, thread-safe `QMCSequenceCache`, stateful `QMCSequenceGenerator`.
 6. **High-Performance JIT & Hardware Acceleration** (`xvasim.jit`, `xvasim.backend`): Numba `@njit(fastmath=True, nogil=True)` kernels and a unified `TensorBackend` abstraction (NumPy, PyTorch, CuPy, JAX) with `use_backend`/`set_backend`/`get_backend`.
+7. **Automatic-Differentiation Greeks** (`xvasim.greeks`): dependency-free NumPy forward-mode AD engine (`Dual`/`Dual2` with chain rules), `compute_greeks` returning analytical, pathwise MC, and closed-form benchmarks; `GreeksResult` with per-model seed availability (delta/gamma/vega/rho).
 
 ## Core Repo Rules
 
@@ -38,6 +39,7 @@ XvaSim/
 │       ├── __init__.py         # Package root exports
 │       ├── backend.py          # TensorBackend hardware abstraction (NumPy, PyTorch, CuPy, JAX)
 │       ├── cva_engine.py       # CVA calculation, chunked evaluation & credit calibration
+│       ├── greeks.py           # Forward-mode autodiff Greeks engine (Dual/Dual2, compute_greeks)
 │       ├── jit.py              # Numba JIT simulation kernels & numerical routines
 │       ├── portfolio.py        # Trades, MarketSimulation, Portfolio netting sets & portfolio XVA
 │       ├── pricing_engine.py   # MC & analytical pricing for IR, FX & inflation derivatives
@@ -58,6 +60,7 @@ XvaSim/
     │   └── test_curves.py      # Flat, upward, and downward mock discount curves
     ├── unit/                   # Isolated unit tests
     │   ├── cva/                # CVA calculation & CIR calibration tests
+    │   ├── greeks/             # Autodiff Greeks engine tests (AD rules, per-model dispatch, error paths)
     │   ├── models/             # Model-specific tests (IR, FX, Credit, Inflation, base, registry)
     │   ├── portfolio/          # Portfolio / netting-set exposure & XVA ledger tests
     │   ├── pricing/            # Pricing engine tests (IRS, XCCY, FX, Inflation, internals, PricingResult)
@@ -66,7 +69,7 @@ XvaSim/
     │   ├── test_jit.py         # Compiled numerical kernels tests
     │   └── utils/              # Helper utilities tests
     ├── integration/            # Multi-model simulations & portfolio CVA pipeline tests
-    └── benchmarks/             # Analytical benchmark vs Monte Carlo convergence tests
+    └── benchmarks/             # Analytical benchmark vs Monte Carlo & AD Greeks convergence tests
 ```
 
 ## Units & Naming Conventions

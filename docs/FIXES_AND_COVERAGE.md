@@ -16,6 +16,7 @@ Log of applied fixes and the current test-coverage picture. Regenerate the cover
 | 2026-09-09 | — | FVA symmetric decomposition: `compute_fva` now returns `{fca, fba, fva}` reporting the funding cost (FCA, positive-exposure leg) and the symmetric funding benefit (FBA, negative-exposure leg) separately; `compute_total_xva` extended with `fca`/`fba` keys (net FVA = FCA + FBA). | `cva_engine.py`, `tests/unit/cva/test_cva_engine.py`, `README.md` | 223/223 tests, coverage 98.0%, Ruff clean, Pyrefly 0 errors |
 | 2026-09-09 | — | Legacy cleanup completed: removed residual "legacy"/"backwards-compatible" wording in `pricing_engine.py`; normalized stale alias references across `README.md`, `AGENTS.md`, and `docs/` (`price_irs`, `price_fx_forward`, `from_lgm_params`, `from_components`, `analytical_swaption_price`, `FXLGMParams`, etc.). | `pricing_engine.py`, `README.md`, `AGENTS.md`, `docs/` | 223/223 tests, coverage 98.0%, Ruff clean, Pyrefly 0 errors |
 | 2026-09-11 | — | Portfolio & Exposure layer: new `src/xvasim/portfolio.py` with `Trade` structural protocol, `FXForwardTrade`, `FXEuropeanOptionTrade`, `MarketSimulation`, `Portfolio` (netting set), `compute_portfolio_exposure`, `compute_portfolio_xva`; `FXModel` gained abstract `domestic_discount_factor`/`foreign_discount_factor` (implemented on `TwoCurrencyFXModel` via `interpolate_discount_factor`); root exports + 26 unit tests + 5 integration tests. | `portfolio.py`, `__init__.py`, `models/base.py`, `models/fx/two_currency.py`, `tests/unit/portfolio/test_portfolio.py`, `tests/integration/test_portfolio_xva_pipeline.py` | 254/254 tests, coverage 97.4%, Ruff clean, Pyrefly 0 errors |
+| 2026-09-11 | — | Autodiff Greeks layer: new `src/xvasim/greeks.py` with NumPy forward-mode AD engine (`Dual`/`Dual2` with chain-rule `exp/log/sqrt/erf/norm_cdf/relu/mean` operators), `compute_greeks(trade, fx_model, method=...)` returning a `GreeksResult` (delta, gamma, vega, rho_domestic, rho_foreign) for FX forwards/options, and per-model seed handling (curve-discounting models drop `rho` seeds, Heston reports `vega=None`, pathwise MC option `gamma=None`); root exports; unit (59) + benchmark (3) tests incl. AD-vs-analytical Black-76 and AD-vs-finite-difference convergence. | `greeks.py`, `__init__.py`, `tests/unit/greeks/`, `tests/benchmarks/test_greeks_autodiff.py` | 305/305 tests, coverage 97.1%, Ruff clean, Pyrefly 0 errors |
 
 ### Known & Intended Behavior Notes
 
@@ -27,8 +28,8 @@ Log of applied fixes and the current test-coverage picture. Regenerate the cover
 
 ### Current Snapshot (measured 2026-09-11)
 
-- Total statements: 3,284; covered: 3,222; missing: 62.
-- **Overall coverage: 97.4%** (requirement: `fail_under = 95.0`).
+- Total statements: 3,719; covered: 3,643; missing: 76.
+- **Overall coverage: 97.1%** (requirement: `fail_under = 95.0`).
 - Branch coverage enabled; both pytest and unittest runners pass.
 
 ### Per-Module Coverage
@@ -38,6 +39,7 @@ Log of applied fixes and the current test-coverage picture. Regenerate the cover
 | `xvasim/__init__.py` | 100.0% | — |
 | `xvasim/backend.py` | 98.4% | 392, 534; branch 502->505, 822->exit |
 | `xvasim/cva_engine.py` | 98.8% | 384, 873 |
+| `xvasim/greeks.py` | 95.0% | 75, 140, 149, 160, 169, 301, 386, 394, 399, 516, 545, 611-612, 749, 802-803; branch 588->579 |
 | `xvasim/jit.py` | 95.4% | 108-109, 116-117, 148, 158 |
 | `xvasim/models/__init__.py` | 100.0% | — |
 | `xvasim/models/base.py` | 100.0% | — |
@@ -60,7 +62,7 @@ Log of applied fixes and the current test-coverage picture. Regenerate the cover
 | `xvasim/pricing_engine.py` | 95.3% | 205, 211, 294-295, 594-596, 685, 924, 992-995, 1244-1249, 1270-1278, 1799-1810 |
 | `xvasim/qmc.py` | 99.0% | branch 585->588; 622 |
 | `xvasim/utils.py` | 100.0% | — |
-| **TOTAL** | **97.4%** | **62 statements** |
+| **TOTAL** | **97.1%** | **76 statements/branches** |
 
 ### Modules Needing Attention
 
@@ -69,6 +71,7 @@ The lowest covered modules are the natural targets for the next coverage increas
 - `xvasim/portfolio.py` (93.2%) — unreachable Protocol/property stubs, defensive branches (non-`str` `trade_id`, `netting=False` empty portfolios, horizon/misaligned-credit argument guards).
 - `xvasim/jit.py` (95.4%) — pure-Python fallback paths (`108-109, 116-117`) and dispatch branches (`148, 158`).
 - `xvasim/models/credit/cir.py` (95.3%) — validation error branches at `165-166`.
+- `xvasim/greeks.py` (95.0%) — error/rejection branches (`516, 545, 611-612`), scalar-`Dual2` division (`140, 149`), plain-array `sqrt`/`norm_cdf` branches (`169, 386, 394, 399`), `Dual.__sub__`/`__rmul__` reverse operators (`75, 160`), and `std_error` property branches (`802-803`).
 
 ### How to Measure Coverage
 

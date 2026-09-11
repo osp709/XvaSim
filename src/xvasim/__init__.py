@@ -25,6 +25,12 @@ from .cva_engine import (
     compute_mva,
     compute_total_xva,
 )
+from .greeks import (
+    Dual,
+    Dual2,
+    GreeksResult,
+    compute_greeks,
+)
 from .jit import (
     cir_calibration_objective_kernel,
     cir_simulate_paths_kernel,
@@ -127,11 +133,14 @@ __all__ = [
     "CIRInterestRateParams",
     "CreditModel",
     "CuPyBackend",
+    "Dual",
+    "Dual2",
     "FXEuropeanOptionTrade",
     "FXForwardTrade",
     "FXModel",
     "GarmanKohlhagenFXModel",
     "GarmanKohlhagenFXParams",
+    "GreeksResult",
     "HestonFXModel",
     "HestonFXParams",
     "HullWhite1FModel",
@@ -183,6 +192,7 @@ __all__ = [
     "compute_dva",
     "compute_exposure_profile",
     "compute_fva",
+    "compute_greeks",
     "compute_kva",
     "compute_marginal_pd",
     "compute_mva",

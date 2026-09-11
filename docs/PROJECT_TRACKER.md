@@ -9,8 +9,8 @@ Living status used by human and AI contributors to keep the project's progress v
 | Branch | `main` (in sync with `origin/main`) |
 | Package version | 0.1.0 |
 | Python | 3.14 (repo requires `>=3.14`) |
-| Tests | 254 passing (pytest), dual-runner compatible (unittest) |
-| Coverage | 97.4% (floor: 95.0%) |
+| Tests | 305 passing (pytest), dual-runner compatible (unittest) |
+| Coverage | 97.1% (floor: 95.0%) |
 | Ruff lint | clean |
 | Pyrefly type check | clean (0 errors) |
 | Last audit | 2026-09-11 |
@@ -37,6 +37,7 @@ Living status used by human and AI contributors to keep the project's progress v
 - **Test suite repair** — replaced legacy alias/param imports in 8 test modules to match canonical APIs; 194 tests green before XVA expansion.
 - **XVA suite expansion** — `compute_dva`, `compute_fva`, `compute_kva`, `compute_mva`, `compute_total_xva` plus ENE/FE exposure profile keys; FVA decomposed into symmetric FCA/FBA legs.
 - **Portfolio & Exposure layer** — `Trade` protocol, `FXForwardTrade`, `FXEuropeanOptionTrade`, `MarketSimulation`, `Portfolio` (netting set), `compute_portfolio_exposure`, `compute_portfolio_xva`; `TwoCurrencyFXModel` gains `domestic_discount_factor`/`foreign_discount_factor`; `FXModel` abstract contract updated.
+- **Autodiff Greeks layer** — dependency-free NumPy forward-mode AD engine (`Dual`/`Dual2`), `compute_greeks` with `autodiff`/`closed_form` and pathwise `monte_carlo` methods, `GreeksResult` container (delta/gamma/vega/rho per model seed availability).
 
 ---
 
@@ -83,10 +84,18 @@ Living status used by human and AI contributors to keep the project's progress v
 - [x] End-to-end `compute_portfolio_xva`: simulate → aggregate → CIR credit calibration → full XVA ledger + exposure profile.
 - [x] `TwoCurrencyFXModel` implements `domestic_discount_factor`/`foreign_discount_factor` abstract methods.
 
+### Greeks & Sensitivities
+- [x] NumPy forward-mode AD engine: `Dual` (first order) and `Dual2` (second order) with arithmetic, `exp`/`log`/`sqrt`/`erf`/`norm_cdf`/`relu`/`mean` operators.
+- [x] `compute_greeks(trade, fx_model, ...)` returning `GreeksResult` (delta, gamma, vega, rho_domestic, rho_foreign) for FX forwards/options.
+- [x] Methods: `autodiff`/`closed_form` (analytical AD) and `monte_carlo` (pathwise AD over frozen QMC draws with `std_error`).
+- [x] Per-model seed handling: `spot_fx`/`fx_vol_ann`/rate seeds where expressible; `rho=None` for Two-Currency and curve-discounting GK/Heston; `vega=None` for Heston; `gamma=None` for pathwise option Monte Carlo.
+- [x] Error contracts: Heston option closed-form `NotImplementedError`, Monte Carlo requires `GarmanKohlhagenFXModel`, unknown `method` raises `ValueError`.
+- [x] AD-vs-analytical Black-76 and AD-vs-finite-difference convergence benchmarks.
+
 ### Quality, Tests & Hygiene
-- [x] 254 tests across unit / integration / benchmarks; dual pytest + unittest.
-- [x] Analytical-vs-MC and path-convergence benchmarks.
-- [x] 97.4% coverage (above 95.0% floor).
+- [x] 305 tests across unit / integration / benchmarks; dual pytest + unittest.
+- [x] Analytical-vs-MC, path-convergence, and AD-vs-analytical/FD Greeks benchmarks.
+- [x] 97.1% coverage (above 95.0% floor).
 - [x] Git hygiene: `*.pyc`, `.coverage`, caches untracked and ignored.
 
 ### Legacy Compatibility Cleanup (new policy)
@@ -97,16 +106,16 @@ Living status used by human and AI contributors to keep the project's progress v
 - [ ] Additional XVA metrics: COLVA, collateral/FVA refinements (netting & collateral CSA modelling).
 - [ ] Model: two-factor Gaussian IR / multi-currency LGM extension.
 - [ ] Bermudan exceptions & exercise-boundary pricing.
-- [ ] Delta/Gamma/Vega bump-and-reval Greeks surface backed by `QMCSequenceGenerator`.
+- [ ] Greeks for additional trade types (interest-rate/CPI derivatives) and higher-order / cross-gamma seeds beyond the `spot_fx` diagonal.
 - [ ] `benchmark_price_year_on_year_inflation_swap` analytical benchmark (currently interpolated-CPI forward project).
 
 ---
 
 ## Current Focus (In Progress)
 
-- Portfolio & Exposure layer landed (Trade protocol, FXForwardTrade, FXEuropeanOptionTrade, MarketSimulation, Portfolio, compute_portfolio_exposure, compute_portfolio_xva); quality gates green at 254 tests / 97.4% coverage.
-- FXModel gained `domestic_discount_factor`/`foreign_discount_factor` abstract contract; `TwoCurrencyFXModel` implements both.
-- Next up: backlog ideas — collateral/COLVA XVA, Greeks surface, YoY inflation benchmark, two-factor Gaussian IR model.
+- Autodiff Greeks layer landed (`greeks.py`); full AD engine + `compute_greeks` with analytical, MC, and Black-76 benchmark convergence tests; 305 tests, coverage 97.1%, all gates green.
+- Portfolio & Exposure layer and end-to-end XVA ledger stable.
+- Next up: backlog ideas — collateral/COLVA XVA, IR/inflation Greeks for additional trade types, YoY inflation benchmark, two-factor Gaussian IR model.
 
 ## How to Update
 
